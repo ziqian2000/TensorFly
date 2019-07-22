@@ -1,9 +1,11 @@
 import numpy as np
 from tensorfly.helper import *
 
+Variable_assign_node_list = []
+
 class Executor:
 	"""Executor computes values for a given subset of nodes in a computation graph.""" 
-	def __init__(self, eval_node_list):
+	def __init__(self, eval_node_list = []):
 		"""
 		Parameters
 		----------
@@ -11,7 +13,7 @@ class Executor:
 		"""
 		self.eval_node_list = eval_node_list
 
-	def run(self, feed_dict):
+	def run(self, feed_dict = {}):
 		"""Computes values of nodes in eval_node_list given computation graph.
 		Parameters
 		----------
@@ -25,6 +27,7 @@ class Executor:
 		# Traverse graph in topological sort order and compute values for all nodes.
 		topo_order = find_topo_sort(self.eval_node_list)
 
+		# make sure the data type is np.ndarray
 		for node in node_to_val_map:
 			if not isinstance(node_to_val_map[node], np.ndarray):
 				node_to_val_map[node] = np.array(node_to_val_map[node])
@@ -38,7 +41,7 @@ class Executor:
 		return node_val_results
 
 class Session:
-	def run(self, fetches, feed_dict = None, options = None, run_metadata = None):
+	def run(self, fetches, feed_dict = {}, options = None, run_metadata = None):
 		if isinstance(fetches, list):
 			self.exe = Executor(fetches)
 			return self.exe.run(feed_dict)

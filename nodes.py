@@ -48,14 +48,6 @@ class Node(object):
 
 	__repr__ = __str__
 
-def Variable(name):
-	"""User defined variables in an expression.  
-		e.g. x = Variable(name = "x")
-	"""
-	placeholder_node = placeholder()
-	placeholder_node.name = name
-	return placeholder_node
-
 class Op(object):
 	"""Op represents operations performed on nodes."""
 	def __call__(self):
@@ -204,9 +196,59 @@ class MatMulOp(Op):
 		
 		return [matmul_op(output_grad, node.inputs[1], False, True), matmul_op(node.inputs[0], output_grad, True, False)]
 
+class AssignOp(Op):
+	def __call__(self, ref, value, validate_shape = None, use_locking = None, name = None):
+		new_node = Op.__call__(self)
+		if not isinstance(value, Node):
+			value = constant(value)
+		new_node.inputs = [value]
+		new_node.const_attr = ref
+		new_node.name = name
+		return new_node
+
+	def compute(self, node, input_vals):
+		node.const_attr.const_attr = input_vals[0]
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class VariableOp(Op):
+	"""mostly the same as PlaceholderOp"""
+	def __call__(self, initilal_value = None, name = "Variable", dtype = None):
+		new_node = Op.__call__(self)
+		if(initilal_value != None):
+			assign_node = assign(new_node, initilal_value)
+			Variable_assign_node_list.append(assign_node)
+		new_node.const_attr = None
+		new_node.name = name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return node.const_attr
+
+	def gradient(self, node, output_grad):
+		return None
+
+class ConstantOp(Op):
+	def __call__(self, value, dtype = None, shape = None, name = 'Const'):
+		new_node = Op.__call__(self)
+		if not isinstance(value, np.ndarray):
+			value = np.array(value)
+		if(dtype != None):
+			value = value.astype(dtype)
+		new_node.const_attr = value
+		new_node.name = name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return node.const_attr
+
+	def gradient(self, node, output_grad):
+		return None
+
 class PlaceholderOp(Op):
 	"""Op to feed value to a nodes."""
-	def __call__(self, dtype, shape = None, name = None):
+	def __call__(self, dtype, shape = None, name = "Placeholder"):
 		"""Creates a variable node."""
 		new_node = Op.__call__(self)
 		new_node.const_attr = (dtype, shape)
@@ -255,6 +297,19 @@ class OnesLikeOp(Op):
 	def gradient(self, node, output_grad):
 		return [zeroslike_op(node.inputs[0])]
 
+class VariableInitOp(Op):
+	def __call__(self):
+		new_node = Op.__call__(self)
+		new_node.name = "VariableInit"
+		return new_node
+
+	def compute(self, node, input_vals):
+		exe = Executor(Variable_assign_node_list)
+		exe.run()
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
 
 # Create global singletons of operators.
 add_op = AddOp()
@@ -262,6 +317,10 @@ mul_op = MulOp()
 add_byconst_op = AddByConstOp()
 mul_byconst_op = MulByConstOp()
 matmul_op = MatMulOp()
+assign = AssignOp()
+Variable = VariableOp()
+constant = ConstantOp()
 placeholder = PlaceholderOp()
 oneslike_op = OnesLikeOp()
 zeroslike_op = ZerosLikeOp()
+global_variables_initializer = VariableInitOp()
