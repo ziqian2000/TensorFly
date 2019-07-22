@@ -42,6 +42,24 @@ class Node(object):
 	__radd__ = __add__
 	__rmul__ = __mul__
 
+	def __sub__(self, other):
+		if isinstance(other, Node):
+			new_node = sub_op(self, other)
+		else:
+			new_node = sub_op(self, constant(other))
+		return new_node
+
+	def __rsub__(self, other):
+		if isinstance(other, Node):
+			new_node = sub_op(other, self)
+		else:
+			new_node = sub_op(constant(other), self)
+		return new_node
+
+	def __neg__(self):
+		new_node = neg_op(self)
+		return new_node
+
 	def __str__(self):
 		"""Allow print to display node name.""" 
 		return self.name
@@ -85,6 +103,19 @@ class Op(object):
 		"""
 		raise NotImplementedError
 
+class NegOp(Op):
+	def __call__(self, node_A):
+		new_node = Op.__call__(self)
+		new_node.inputs = [node_A]
+		new_node.name = "(-%s)" % (node_A.name)
+		return new_node
+
+	def compute(self, node, input_vals):
+		return -input_vals[0]
+
+	def gradient(self, node, output_grad):
+		return [-output_grad]
+
 class AddOp(Op):
 	"""Op to element-wise add two nodes."""
 	def __call__(self, node_A, node_B):
@@ -119,6 +150,19 @@ class AddByConstOp(Op):
 	def gradient(self, node, output_grad):
 		"""Given gradient of add node, return gradient contribution to input."""
 		return [output_grad]
+
+class SubOp(Op):
+	def __call__(self, node_A, node_B):
+		new_node = Op.__call__(self)
+		new_node.inputs = [node_A, node_B]
+		new_node.name = "(%s-%s)" % (node_A.name, node_B.name)
+		return new_node
+
+	def compute(self, node, input_vals):
+		return input_vals[0] - input_vals[1]
+
+	def gradient(self, node, output_grad):
+		return [output_grad, -output_grad]
 
 class MulOp(Op):
 	"""Op to element-wise multiply two nodes."""
@@ -310,17 +354,34 @@ class VariableInitOp(Op):
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
+class ReduceSumOp(Op):
+	def __call__(self, input_tensor, axis = None, keepdims = False, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [input_tensor]
+		new_node.const_attr = (axis, keepdims)
+		new_node.name = name if name != None else "ReduceSum(%s)" % input_tensor.name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.sum(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
 
 # Create global singletons of operators.
-add_op = AddOp()
-mul_op = MulOp()
 add_byconst_op = AddByConstOp()
-mul_byconst_op = MulByConstOp()
-matmul_op = MatMulOp()
+add_op = AddOp()
 assign = AssignOp()
-Variable = VariableOp()
 constant = ConstantOp()
-placeholder = PlaceholderOp()
-oneslike_op = OnesLikeOp()
-zeroslike_op = ZerosLikeOp()
 global_variables_initializer = VariableInitOp()
+matmul_op = MatMulOp()
+mul_byconst_op = MulByConstOp()
+mul_op = MulOp()
+neg_op = NegOp()
+oneslike_op = OnesLikeOp()
+placeholder = PlaceholderOp()
+reduce_sum = ReduceSumOp()
+sub_op = SubOp()
+Variable = VariableOp()
+zeroslike_op = ZerosLikeOp()

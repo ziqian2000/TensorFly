@@ -48,3 +48,9 @@ class Session:
 		else:
 			self.exe = Executor([fetches])
 			return self.exe.run(feed_dict)[0]
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, val, type, trace):
+		pass
