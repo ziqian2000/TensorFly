@@ -385,7 +385,7 @@ class ReduceSumOp(Op):
 		return np.sum(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
 
 	def gradient(self, node, output_grad):
-		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0], node.const_attr[1])]
+		return [adaptive_broadcast_to_op(output_grad, node.inputs[0], node.const_attr[0], node.const_attr[1])]
 
 class ReduceMeanOp(Op):
 	def __call__(self, input_tensor, axis = None, keepdims = False, name = None, reduction_indices = None):
@@ -404,14 +404,14 @@ class ReduceMeanOp(Op):
 		return np.mean(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
 
 	def gradient(self, node, output_grad):
-		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0], node.const_attr[1])
+		return [adaptive_broadcast_to_op(output_grad, node.inputs[0], node.const_attr[0], node.const_attr[1])
 				/ reduce_sum(oneslike_op(node.inputs[0]), axis = node.const_attr[0], keepdims = True)]
 
 class AdaptiveBroadcastToOp(Op):
 	""" transform 'tensor' into new 'shape' by inserting an axis in position 'axis' and repeating elements on that axis """
-	def __call__(self, tensor, axis, keepdims, name = None):
+	def __call__(self, tensor, tensor_input, axis, keepdims, name = None):
 		new_node = Op.__call__(self)
-		new_node.inputs = [tensor]
+		new_node.inputs = [tensor, tensor_input]
 		new_node.const_attr = (axis, keepdims)
 		new_node.name = name if name != None else "BroadcastTo(%s,axis=%s)" % (tensor.name, axis)
 		return new_node
@@ -422,10 +422,10 @@ class AdaptiveBroadcastToOp(Op):
 		if(keepdims):
 			val = np.sum(val, axis)
 		if axis is None:
-			return np.ones()
+			return np.ones(input_vals[1].shape) * val
 		else:
 			ex_val = np.expand_dims(val, axis = axis)
-			for i in range(np.shape(input_vals[0])[axis] - 1):
+			for i in range(np.shape(input_vals[1])[axis] - 1):
 				ex_val = np.insert(ex_val, 0, val, axis = axis)
 			return ex_val
 
@@ -484,6 +484,48 @@ class LogOp(Op):
 	def gradient(self, node, output_grad):
 		return [output_grad / node.inputs[0]]
 
+class EqualOp(Op):
+	def __call__(self, x, y, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [x, y]
+		new_node.name = name if name != None else "Equal(%s,%s)" % (x.name, y.name)
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.equal(input_vals[0], input_vals[1])
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class ArgMaxOp(Op):
+	def __call__(self, input, axis = None, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [input]
+		new_node.const_attr = axis
+		new_node.name = name if name != None else "ArgMax(%s,axis=%s)" % (input.name, axis)
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.argmax(input_vals[0], axis = node.const_attr)
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class CastOp():
+	def __call__(self, x, dtype, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [x]
+		new_node.const_attr = dtype
+		new_node.name = name if name != None else "Cast(%s,dtype=%s)" % (x.name, dtype)
+		return new_node
+
+	def compute(self, node, input_vals):
+		return input_vals[0].astype(node.const_attr)
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+
 
 # Create global singletons of operators.
 add_byconst_op = AddByConstOp()
@@ -507,6 +549,9 @@ zeroslike_op = ZerosLikeOp()
 adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
 div_op = DivOp()
 exp = ExpOp()
+equal = EqualOp()
+argmax = ArgMaxOp()
+cast = CastOp()
 
 class nn:
 	softmax = SoftmaxOp()
