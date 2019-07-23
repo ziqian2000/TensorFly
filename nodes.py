@@ -56,6 +56,10 @@ class Node(object):
 			new_node = sub_op(constant(other), self)
 		return new_node
 
+	def __truediv__(self, other):
+		assert isinstance(other, Node)
+		return div_op(self, other)
+
 	def __neg__(self):
 		new_node = neg_op(self)
 		return new_node
@@ -180,7 +184,6 @@ class MulOp(Op):
 
 	def gradient(self, node, output_grad):
 		"""Given gradient of multiply node, return gradient contributions to each input."""
-		
 		return [output_grad * node.inputs[1], output_grad * node.inputs[0]]
 
 class MulByConstOp(Op):
@@ -200,7 +203,6 @@ class MulByConstOp(Op):
 
 	def gradient(self, node, output_grad):
 		"""Given gradient of multiplication node, return gradient contribution to input."""
-		
 		return [node.const_attr * output_grad]
 
 class MatMulOp(Op):
@@ -237,7 +239,22 @@ class MatMulOp(Op):
 			
 		Useful formula: if Y=AB, then dA=dY B^T, dB=A^T dY
 		"""
-		return [matmul_op(output_grad, node.inputs[1], False, True), matmul_op(node.inputs[0], output_grad, True, False)]
+		return [matmul(output_grad, node.inputs[1], False, True), matmul(node.inputs[0], output_grad, True, False)]
+
+class DivOp(Op):
+	def __call__(self, node_A, node_B):
+		new_node = Op.__call__(self)
+		new_node.inputs = [node_A, node_B]
+		new_node.name = "(%s/%s)" % (node_A.name, node_B.name)
+		return new_node
+
+	def compute(self, node, input_vals):
+		"""Given values of two input nodes, return result of element-wise multiplication."""
+		assert len(input_vals) == 2
+		return np.divide(input_vals[0], input_vals[1])
+
+	def gradient(self, node, output_grad):
+		return [output_grad / node.inputs[1], output_grad * (-node.inputs[0]/node.inputs[1]/node.inputs[1])]
 
 class AssignOp(Op):
 	def __call__(self, ref, value, validate_shape = None, use_locking = None, name = None):
@@ -317,7 +334,6 @@ class ZerosLikeOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Returns zeros_like of the same shape as input."""
-		assert(isinstance(input_vals[0], np.ndarray))
 		return np.zeros(input_vals[0].shape)
 
 	def gradient(self, node, output_grad):
@@ -334,7 +350,6 @@ class OnesLikeOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Returns ones_like of the same shape as input."""
-		assert(isinstance(input_vals[0], np.ndarray))
 		return np.ones(input_vals[0].shape)
 
 	def gradient(self, node, output_grad):
@@ -355,10 +370,14 @@ class VariableInitOp(Op):
 
 class ReduceSumOp(Op):
 	def __call__(self, input_tensor, axis = None, keepdims = False, name = None, reduction_indices = None):
-		assert keepdims == False # simplify
 		new_node = Op.__call__(self)
 		new_node.inputs = [input_tensor]
-		new_node.const_attr = (axis if axis is not None else reduction_indices, keepdims)
+		if axis is None and reduction_indices is not None:
+			axis = reduction_indices
+		if isinstance(axis, list):
+			assert(len(axis) == 1) # simplify
+			axis = axis[0]
+		new_node.const_attr = (axis, keepdims)
 		new_node.name = name if name != None else "ReduceSum(%s)" % input_tensor.name
 		return new_node
 
@@ -366,14 +385,18 @@ class ReduceSumOp(Op):
 		return np.sum(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
 
 	def gradient(self, node, output_grad):
-		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0])]
+		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0], node.const_attr[1])]
 
 class ReduceMeanOp(Op):
 	def __call__(self, input_tensor, axis = None, keepdims = False, name = None, reduction_indices = None):
-		assert keepdims == False # simplify
 		new_node = Op.__call__(self)
 		new_node.inputs = [input_tensor]
-		new_node.const_attr = (axis if axis is not None else reduction_indices, keepdims)
+		if axis is None and reduction_indices is not None:
+			axis = reduction_indices
+		if isinstance(axis, list):
+			assert(len(axis) == 1) # simplify
+			axis = axis[0]
+		new_node.const_attr = (axis, keepdims)
 		new_node.name = name if name != None else "ReduceMean(%s)" % input_tensor.name
 		return new_node
 
@@ -381,25 +404,30 @@ class ReduceMeanOp(Op):
 		return np.mean(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
 
 	def gradient(self, node, output_grad):
-		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0]) * (1.0 / np.size(np.inputs[0]))]
+		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0], node.const_attr[1])
+				/ reduce_sum(oneslike_op(node.inputs[0]), axis = node.const_attr[0], keepdims = True)]
 
 class AdaptiveBroadcastToOp(Op):
 	""" transform 'tensor' into new 'shape' by inserting an axis in position 'axis' and repeating elements on that axis """
-	def __call__(self, tensor, shape, axis, name = None):
+	def __call__(self, tensor, axis, keepdims, name = None):
 		new_node = Op.__call__(self)
 		new_node.inputs = [tensor]
-		new_node.const_attr = (shape, axis)
-		new_node.name = name if name != None else "BroadcastTo(%s,shape=%s,axis=%s)" % (tensor.name, shape, axis)
+		new_node.const_attr = (axis, keepdims)
+		new_node.name = name if name != None else "BroadcastTo(%s,axis=%s)" % (tensor.name, axis)
 		return new_node
 
 	def compute(self, node, input_vals):
-		shape, axis = new_node.inputs
-		val = inputs_vals[0]
-		## assuming that keepdims is false
-		ex_val = np.expand_dims(val, axis = axis)
-		for i in range(shape[axis] - 1):
-			ex_val = np.insert(ex_val, 0, val, axis = axis)
-		return ex_val
+		axis, keepdims = node.const_attr
+		val = input_vals[0]
+		if(keepdims):
+			val = np.sum(val, axis)
+		if axis is None:
+			return np.ones()
+		else:
+			ex_val = np.expand_dims(val, axis = axis)
+			for i in range(np.shape(input_vals[0])[axis] - 1):
+				ex_val = np.insert(ex_val, 0, val, axis = axis)
+			return ex_val
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -419,19 +447,29 @@ class ZerosOp(Op):
 		return None
 
 class SoftmaxOp(Op):
-	def __call__(self, logits, name = None):
-		new_node = Op.__call__(self)
-		new_node.inputs = [logits]
-		new_node.name = name
-		return new_node
+	def __call__(self, logits, axis = -1, name = None):
+		exp_node = exp(logits)
+		return exp_node / reduce_sum(exp_node, axis = axis, keepdims = True)
 
 	def compute(self, node, input_vals):
-		val = np.exp(inputs_val[0])
-		return val / np.sum(val, axis = -1, keepdims = True)
+		raise NotImplementedError
 
 	def gradient(self, node ,output_grad):
 		raise NotImplementedError
 
+
+class ExpOp(Op):
+	def __call__(self, x, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [x]
+		new_node.name = name if name != None else "Exp(%s)" % x.name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.exp(input_vals[0])
+
+	def gradient(self, node, output_grad):
+		return [node * output_grad]
 
 class LogOp(Op):
 	def __call__(self, x, name = None):
@@ -444,7 +482,7 @@ class LogOp(Op):
 		return np.log(input_vals[0])
 
 	def gradient(self, node, output_grad):
-		raise NotImplementedError
+		return [output_grad / node.inputs[0]]
 
 
 # Create global singletons of operators.
@@ -467,6 +505,8 @@ Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
 adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
+div_op = DivOp()
+exp = ExpOp()
 
 class nn:
 	softmax = SoftmaxOp()
