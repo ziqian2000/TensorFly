@@ -1,5 +1,6 @@
 import numpy as np
 from tensorfly.helper import *
+from tensorfly.nodes import oneslike_op
 
 float32 = np.float32
 float64 = np.float64

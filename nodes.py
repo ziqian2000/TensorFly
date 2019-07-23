@@ -237,7 +237,6 @@ class MatMulOp(Op):
 			
 		Useful formula: if Y=AB, then dA=dY B^T, dB=A^T dY
 		"""
-		
 		return [matmul_op(output_grad, node.inputs[1], False, True), matmul_op(node.inputs[0], output_grad, True, False)]
 
 class AssignOp(Op):
@@ -355,15 +354,94 @@ class VariableInitOp(Op):
 		raise NotImplementedError
 
 class ReduceSumOp(Op):
-	def __call__(self, input_tensor, axis = None, keepdims = False, name = None):
+	def __call__(self, input_tensor, axis = None, keepdims = False, name = None, reduction_indices = None):
+		assert keepdims == False # simplify
 		new_node = Op.__call__(self)
 		new_node.inputs = [input_tensor]
-		new_node.const_attr = (axis, keepdims)
+		new_node.const_attr = (axis if axis is not None else reduction_indices, keepdims)
 		new_node.name = name if name != None else "ReduceSum(%s)" % input_tensor.name
 		return new_node
 
 	def compute(self, node, input_vals):
 		return np.sum(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
+
+	def gradient(self, node, output_grad):
+		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0])]
+
+class ReduceMeanOp(Op):
+	def __call__(self, input_tensor, axis = None, keepdims = False, name = None, reduction_indices = None):
+		assert keepdims == False # simplify
+		new_node = Op.__call__(self)
+		new_node.inputs = [input_tensor]
+		new_node.const_attr = (axis if axis is not None else reduction_indices, keepdims)
+		new_node.name = name if name != None else "ReduceMean(%s)" % input_tensor.name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.mean(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
+
+	def gradient(self, node, output_grad):
+		return [adaptive_broadcast_to_op(output_grad, node.const_attr[0]) * (1.0 / np.size(np.inputs[0]))]
+
+class AdaptiveBroadcastToOp(Op):
+	""" transform 'tensor' into new 'shape' by inserting an axis in position 'axis' and repeating elements on that axis """
+	def __call__(self, tensor, shape, axis, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [tensor]
+		new_node.const_attr = (shape, axis)
+		new_node.name = name if name != None else "BroadcastTo(%s,shape=%s,axis=%s)" % (tensor.name, shape, axis)
+		return new_node
+
+	def compute(self, node, input_vals):
+		shape, axis = new_node.inputs
+		val = inputs_vals[0]
+		## assuming that keepdims is false
+		ex_val = np.expand_dims(val, axis = axis)
+		for i in range(shape[axis] - 1):
+			ex_val = np.insert(ex_val, 0, val, axis = axis)
+		return ex_val
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+
+class ZerosOp(Op):
+	def __call__(self, shape, dtype = np.float32, name = None):
+		new_node = Op.__call__(self)
+		new_node.const_attr = np.zeros(shape)
+		new_node.name = name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return node.const_attr
+
+	def gradient(self, node ,output_grad):
+		return None
+
+class SoftmaxOp(Op):
+	def __call__(self, logits, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [logits]
+		new_node.name = name
+		return new_node
+
+	def compute(self, node, input_vals):
+		val = np.exp(inputs_val[0])
+		return val / np.sum(val, axis = -1, keepdims = True)
+
+	def gradient(self, node ,output_grad):
+		raise NotImplementedError
+
+
+class LogOp(Op):
+	def __call__(self, x, name = None):
+		new_node = Op.__call__(self)
+		new_node.inputs = [x]
+		new_node.name = name if name != None else "Log(%s)" % x.name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.log(input_vals[0])
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -375,13 +453,20 @@ add_op = AddOp()
 assign = AssignOp()
 constant = ConstantOp()
 global_variables_initializer = VariableInitOp()
-matmul_op = MatMulOp()
+log = LogOp()
+matmul = MatMulOp()
 mul_byconst_op = MulByConstOp()
 mul_op = MulOp()
 neg_op = NegOp()
 oneslike_op = OnesLikeOp()
 placeholder = PlaceholderOp()
+reduce_mean = ReduceMeanOp()
 reduce_sum = ReduceSumOp()
 sub_op = SubOp()
 Variable = VariableOp()
+zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
+adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
+
+class nn:
+	softmax = SoftmaxOp()
