@@ -271,6 +271,7 @@ class AssignOp(Op):
 
 	def compute(self, node, input_vals):
 		node.const_attr.const_attr = input_vals[0]
+		return input_vals[0]
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -612,6 +613,46 @@ class SoftmaxCrossEntropyWithLogitsOp(Op):
 		"""as the second gradient is useless so I just return zeros to make it faster"""
 		return [output_grad * (softmax_calc_op(node.inputs[0]) - node.inputs[1]), zeroslike_op(node.inputs[1])]
 
+class PowOp(Op):
+	def __call__(self, x, y):
+		new_node = Op.__call__(self)
+		new_node.inputs = [x, y]
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.pow(x, y)
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class SqrtOp(Op):
+	def __call__(self, x):
+		new_node = Op.__call__(self)
+		new_node.inputs = [x]
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.sqrt(input_vals[0])
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class AdamCalcOp(Op):
+	def __call__(self, t, learning_rate, beta1, beta2, epsilon):
+		new_node = Op.__call__(self)
+		new_node.inputs = [t]
+		new_node.const_attr = (learning_rate, beta1, beta2, epsilon)
+		return new_node
+
+	def compute(self, node, input_vals):
+		t = input_vals[0]
+		learning_rate, beta1, beta2, epsilon = node.const_attr
+		lrt = learning_rate * np.sqrt(1 - np.power(beta2, t)) / (1 - np.power(beta1, t))
+		return lrt
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
 
 # Create global singletons of operators.
 adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
@@ -642,6 +683,9 @@ sub_op = SubOp()
 Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
+pow_op = PowOp()
+sqrt_op = SqrtOp()
+adam_calc_op = AdamCalcOp()
 
 
 class nn:

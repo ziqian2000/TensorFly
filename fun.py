@@ -45,7 +45,13 @@ def gradients(output_node, node_list):
 class train:
 
 	class Optimizer:
-		pass
+		def get_variables_need(self, loss):
+			nodes_need = find_topo_sort([loss])
+			variables_need = []
+			for node in nodes_need:
+				if isinstance(node.op, VariableOp):
+					variables_need.append(node)
+			return variables_need
 
 	class GradientDescentOptimizer(Optimizer):
 		def __init__(self, learning_rate, use_locking = False, name = 'GradientDescent'):
@@ -54,14 +60,38 @@ class train:
 			self.name = name
 
 		def minimize(self, loss):
-			nodes_need = find_topo_sort([loss])
-			variables_need = []
-			for node in nodes_need:
-				if isinstance(node.op, VariableOp):
-					variables_need.append(node)
+			variables_need = self.get_variables_need(loss)
 			gradients_need = gradients(loss, variables_need)
 			train_node = [assign(variables_need[i], variables_need[i] - gradients_need[i] * self.learning_rate) for i in range(len(variables_need))]
 			return pack(train_node)
+
+	class AdamOptimizer(Optimizer):
+		def __init__(self, learning_rate = 0.001, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-08, use_locking = False, name = 'Adam'):
+			assert use_locking == False # simplify
+			self.learning_rate = learning_rate
+			self.beta1 = beta1
+			self.beta2 = beta2
+			self.epsilon = epsilon
+			self.name = name
+
+		def minimize(self, loss):
+			self.t = constant(0)
+			self.assign_t = assign(self.t, self.t + 1)
+			self.lrt = adam_calc_op(self.assign_t, learning_rate = self.learning_rate, beta1 = self.beta1, beta2 = self.beta2, epsilon = self.epsilon)
+
+			variables_need = self.get_variables_need(loss)
+			gradients_need = gradients(loss, variables_need)
+			train_node = []
+			for i, node in enumerate(variables_need):
+				g = gradients_need[i]
+				m = constant(0)
+				assign_m = assign(m, self.beta1 * m + (1 - self.beta1) * g)
+				v = constant(0)
+				assign_v = assign(v, self.beta2 * v + (1 - self.beta2) * g * g)
+				assign_node = assign(node, node - self.lrt * assign_m / (sqrt_op(assign_v) + self.epsilon))
+				train_node.append(assign_node)
+			return pack(train_node)
+
 
 def random_normal(shape, mean = 0.0, stddev = 1.0, dtype = float32, seed = None, name = None):
 	return np.random.normal(loc = mean, scale = stddev, size = shape).astype(dtype)
