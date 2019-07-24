@@ -70,6 +70,10 @@ class Node(object):
 
 	__repr__ = __str__
 
+	def eval(self, feed_dict = {}):
+		self.exe = Executor([self])
+		return self.exe.run(feed_dict)[0]
+
 class Op(object):
 	"""Op represents operations performed on nodes."""
 	def __call__(self):
@@ -130,12 +134,11 @@ class AddOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Given values of two input nodes, return result of element-wise addition."""
-		assert len(input_vals) == 2
 		return input_vals[0] + input_vals[1]
 
 	def gradient(self, node, output_grad):
 		"""Given gradient of add node, return gradient contributions to each input."""
-		return [output_grad, output_grad]
+		return [reduce_shape(output_grad, node.inputs[0]), reduce_shape(output_grad, node.inputs[1])]
 
 class AddByConstOp(Op):
 	"""Op to element-wise add a nodes by a constant."""
@@ -276,7 +279,7 @@ class VariableOp(Op):
 	"""mostly the same as PlaceholderOp"""
 	def __call__(self, initilal_value = None, name = "Variable", dtype = None):
 		new_node = Op.__call__(self)
-		if(initilal_value != None):
+		if initilal_value is not None:
 			assign_node = assign(new_node, initilal_value)
 			Variable_assign_node_list.append(assign_node)
 		new_node.const_attr = None
@@ -446,13 +449,29 @@ class ZerosOp(Op):
 	def gradient(self, node ,output_grad):
 		return None
 
-class SoftmaxOp(Op):
+class SoftmaxJointOp(Op):
+	"""available gradient"""
 	def __call__(self, logits, axis = -1, name = None):
 		exp_node = exp(logits)
 		return exp_node / reduce_sum(exp_node, axis = axis, keepdims = True)
 
 	def compute(self, node, input_vals):
 		raise NotImplementedError
+
+	def gradient(self, node ,output_grad):
+		raise NotImplementedError
+
+class SoftmaxCalcOp(Op):
+	"""unavailable gradient"""
+	def __call__(self, x, axis = -1, name = None):
+		new_node = Op.__call__(self)
+		new_node.const_attr = axis
+		new_node.inputs = [x]
+		new_node.name = name if name != None else "SoftmaxCalc(%s)" % x.name
+		return new_node
+
+	def compute(self, node, input_vals):
+		return SoftmaxCalcFunc(input_vals[0])
 
 	def gradient(self, node ,output_grad):
 		raise NotImplementedError
@@ -525,13 +544,86 @@ class CastOp():
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
+class PackOp(Op):
+	def __call__(self, nodes_list):
+		new_node = Op.__call__(self)
+		new_node.inputs = nodes_list
+		return new_node
+
+	def compute(self, node, input_vals):
+		return None
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class ReduceShapeOp(Op):
+	'''reduce the shape of tensor to target by np.sum(axis = 0)
+	   this op is used in gradients function of AddOp since the add operator is right(high dim)-aligned'''
+	def __call__(self, tensor, target):
+		new_node = Op.__call__(self)
+		new_node.inputs = [tensor, target]
+		return new_node
+
+	def compute(self, node, input_vals):
+		tensor = input_vals[0]
+		shape = input_vals[1].shape
+		while len(tensor.shape) > len(shape):
+			tensor = np.sum(tensor, axis = 0)
+		return tensor
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class ReluOp(Op):
+	def __call__(self, tensor):
+		new_node = Op.__call__(self)
+		new_node.inputs = [tensor]
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.maximum(input_vals[0], 0)
+
+	def gradient(self, node, output_grad):
+		return [output_grad * relu_gradient(node)]
+
+class ReluGradientOp():
+	def __call__(self, tensor):
+		new_node = Op.__call__(self)
+		new_node.inputs = [tensor]
+		return new_node
+
+	def compute(self, node, input_vals):
+		return (np.sign(input_vals[0]) + 1) * 0.5
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class SoftmaxCrossEntropyWithLogitsOp(Op):
+	def __call__(self, labels, logits):
+		new_node = Op.__call__(self)
+		new_node.inputs = [logits, labels]
+		return new_node
+
+	def compute(self, node, input_vals):
+		log_node = np.log(SoftmaxCalcFunc(input_vals[0]))
+		return -np.sum(log_node * input_vals[1], axis = -1, keepdims = True)
+
+	def gradient(self, node, output_grad):
+		"""as the second gradient is useless so I just return zeros to make it faster"""
+		return [output_grad * (softmax_calc_op(node.inputs[0]) - node.inputs[1]), zeroslike_op(node.inputs[1])]
 
 
 # Create global singletons of operators.
+adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
 add_byconst_op = AddByConstOp()
 add_op = AddOp()
+argmax = ArgMaxOp()
 assign = AssignOp()
+cast = CastOp()
 constant = ConstantOp()
+div_op = DivOp()
+equal = EqualOp()
+exp = ExpOp()
 global_variables_initializer = VariableInitOp()
 log = LogOp()
 matmul = MatMulOp()
@@ -539,19 +631,26 @@ mul_byconst_op = MulByConstOp()
 mul_op = MulOp()
 neg_op = NegOp()
 oneslike_op = OnesLikeOp()
+pack = PackOp()
 placeholder = PlaceholderOp()
 reduce_mean = ReduceMeanOp()
+reduce_shape = ReduceShapeOp()
 reduce_sum = ReduceSumOp()
+relu_gradient = ReluGradientOp()
+softmax_calc_op = SoftmaxCalcOp() # unavailable gradient
 sub_op = SubOp()
 Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
-adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
-div_op = DivOp()
-exp = ExpOp()
-equal = EqualOp()
-argmax = ArgMaxOp()
-cast = CastOp()
+
 
 class nn:
-	softmax = SoftmaxOp()
+	relu = ReluOp()
+	softmax = SoftmaxJointOp() # available gradient
+	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
+
+
+def SoftmaxCalcFunc(tensor):
+	exp_tensor = np.exp(tensor - np.max(tensor, axis = -1, keepdims = True))
+	softmax_tensor = exp_tensor / np.sum(exp_tensor, axis = -1, keepdims = True)
+	return softmax_tensor

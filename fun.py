@@ -1,6 +1,6 @@
 import numpy as np
 from tensorfly.helper import *
-from tensorfly.nodes import oneslike_op
+from tensorfly.nodes import *
 
 float32 = np.float32
 float64 = np.float64
@@ -41,3 +41,27 @@ def gradients(output_node, node_list):
 	# Collect results for gradients requested.
 	grad_node_list = [node_to_output_grad[node] for node in node_list]
 	return grad_node_list
+
+class train:
+
+	class Optimizer:
+		pass
+
+	class GradientDescentOptimizer(Optimizer):
+		def __init__(self, learning_rate, use_locking = False, name = 'GradientDescent'):
+			assert use_locking == False # simplify
+			self.learning_rate = learning_rate
+			self.name = name
+
+		def minimize(self, loss):
+			nodes_need = find_topo_sort([loss])
+			variables_need = []
+			for node in nodes_need:
+				if isinstance(node.op, VariableOp):
+					variables_need.append(node)
+			gradients_need = gradients(loss, variables_need)
+			train_node = [assign(variables_need[i], variables_need[i] - gradients_need[i] * self.learning_rate) for i in range(len(variables_need))]
+			return pack(train_node)
+
+def random_normal(shape, mean = 0.0, stddev = 1.0, dtype = float32, seed = None, name = None):
+	return np.random.normal(loc = mean, scale = stddev, size = shape).astype(dtype)
