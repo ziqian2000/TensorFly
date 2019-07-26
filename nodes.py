@@ -665,26 +665,59 @@ class Conv2dOp(Op):
 	def compute(self, node, input_vals):
 		input, filter = input_vals
 		strides, padding = node.const_attr
-		assert strides == [1, 1, 1, 1] and padding == 'SAME' # simplify
-		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
-		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
+		assert padding == 'SAME' # simplify
+		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = node.const_attr[0], padding = node.const_attr[1])
+
+	def gradient(self, node, output_grad):
+		assert node.const_attr[0] == [1, 1, 1, 1] and node.const_attr[1] == 'SAME'
+		return [conv2d_grad_1_op(output_grad, node.inputs[1]), conv2d_grad_2_op(output_grad, node.inputs[0], node.inputs[1])]
+
+class Conv2dGrad1Op(Op):
+	""" assuming strides == [1,1,1,1] and padding == 'SAME' """
+	def __call__(self, output_grad, filter):
+		new_node = Op.__call__(self)
+		new_node.inputs = [output_grad, filter]
+		return new_node
+
+	def compute(self, node, input_vals):
+		"""maybe it can return zeros since it can not be changed"""
+		assert input_vals[1].shape[0] % 2 == 1 and input_vals[1].shape[1] % 2 == 1 # simplify
+		return Conv2dFunc(input = input_vals[0], filter = np.rot90(np.transpose(input_vals[1], (0, 1, 3, 2)), axes = (0, 1), k = 2), 
+						strides = [1,1,1,1], padding = 'SAME')
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class Conv2dGrad2Op(Op):
+	""" assuming strides == [1,1,1,1] and padding == 'SAME' """
+	def __call__(self, output_grad, input, filter):
+		new_node = Op.__call__(self)
+		new_node.inputs = [output_grad, input, filter]
+		return new_node
+
+	def compute(self, node, input_vals):
+		output_grad, input, filter = input_vals
+
+		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = 1)
+		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = 1)
 		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
 											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
-
 		n_input = n_input.astype(np.float32)
-		filter = filter.astype(np.float32)
-		output = np.zeros([input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result
-		assert c_core.conv2d(	get_pointer(n_input), 	n_input.shape[0], 	n_input.shape[1], 	n_input.shape[2], 	n_input.shape[3], 
-								get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
-								get_pointer(output),	output.shape[0], 	output.shape[1],	output.shape[2],	output.shape[3],
-								strides[1], 			strides[2]) == 0
+		output_grad = output_grad.astype(np.float32)
+		output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
+		assert c_core.conv2d_grad(get_pointer(n_input), 	n_input.shape[0], 		n_input.shape[1], 		n_input.shape[2], 		n_input.shape[3], 
+								  get_pointer(output_grad), output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3], 
+								  get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],) == 0
+
 		return output
+
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
 
 # Create global singletons of operators.
+adam_calc_op = AdamCalcOp()
 adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
 add_byconst_op = AddByConstOp()
 add_op = AddOp()
@@ -704,28 +737,44 @@ neg_op = NegOp()
 oneslike_op = OnesLikeOp()
 pack = PackOp()
 placeholder = PlaceholderOp()
+pow_op = PowOp()
 reduce_mean = ReduceMeanOp()
 reduce_shape = ReduceShapeOp()
 reduce_sum = ReduceSumOp()
 relu_gradient = ReluGradientOp()
 softmax_calc_op = SoftmaxCalcOp() # unavailable gradient
+sqrt_op = SqrtOp()
 sub_op = SubOp()
 Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
-pow_op = PowOp()
-sqrt_op = SqrtOp()
-adam_calc_op = AdamCalcOp()
+conv2d_grad_1_op = Conv2dGrad1Op()
+conv2d_grad_2_op = Conv2dGrad2Op()
 
 
 class nn:
+	conv2d = Conv2dOp()
 	relu = ReluOp()
 	softmax = SoftmaxJointOp() # available gradient
 	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
-	conv2d = Conv2dOp()
 
 
 def SoftmaxCalcFunc(tensor):
 	exp_tensor = np.exp(tensor - np.max(tensor, axis = -1, keepdims = True))
 	softmax_tensor = exp_tensor / np.sum(exp_tensor, axis = -1, keepdims = True)
 	return softmax_tensor
+
+def Conv2dFunc(input, filter, strides, padding):
+	n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
+	n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
+	n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
+										left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
+
+	n_input = n_input.astype(np.float32)
+	filter = filter.astype(np.float32)
+	output = np.zeros([input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result
+	assert c_core.conv2d(	get_pointer(n_input), 	n_input.shape[0], 	n_input.shape[1], 	n_input.shape[2], 	n_input.shape[3], 
+							get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
+							get_pointer(output),	output.shape[0], 	output.shape[1],	output.shape[2],	output.shape[3],
+							strides[1], 			strides[2]) == 0
+	return output
