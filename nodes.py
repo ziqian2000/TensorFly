@@ -1,5 +1,7 @@
 import numpy as np
+from tensorfly.connection import *
 from tensorfly.executor import *
+from tensorfly.helper import *
 
 class Node(object):
 	"""Node in a computation graph."""
@@ -653,6 +655,34 @@ class AdamCalcOp(Op):
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
+class Conv2dOp(Op):
+	def __call__(self, input, filter, strides, padding):
+		new_node = Op.__call__(self)
+		new_node.inputs = [input, filter]
+		new_node.const_attr = (strides, padding)
+		return new_node
+
+	def compute(self, node, input_vals):
+		input, filter = input_vals
+		strides, padding = node.const_attr
+		assert strides == [1, 1, 1, 1] and padding == 'SAME' # simplify
+		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
+		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
+		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
+											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
+
+		n_input = n_input.astype(np.float32)
+		filter = filter.astype(np.float32)
+		output = np.zeros([input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result
+		assert c_core.conv2d(	get_pointer(n_input), 	n_input.shape[0], 	n_input.shape[1], 	n_input.shape[2], 	n_input.shape[3], 
+								get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
+								get_pointer(output),	output.shape[0], 	output.shape[1],	output.shape[2],	output.shape[3],
+								strides[1], 			strides[2]) == 0
+		return output
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
 
 # Create global singletons of operators.
 adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
@@ -692,6 +722,7 @@ class nn:
 	relu = ReluOp()
 	softmax = SoftmaxJointOp() # available gradient
 	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
+	conv2d = Conv2dOp()
 
 
 def SoftmaxCalcFunc(tensor):
