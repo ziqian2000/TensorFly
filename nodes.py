@@ -755,26 +755,16 @@ class MaxPoolGradOp(Op):
 		ksize, strides = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
-											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
-		output = np.zeros_like(input)
-		for b in range(output_grad.shape[0]):
-			for i in range(output_grad.shape[1]):
-				for j in range(output_grad.shape[2]):
-					for k in range(output_grad.shape[3]):
-						ii = i * strides[1]
-						jj = j * strides[2]
-						max_v = n_input[b][ii][jj][k]
-						max_px = ii
-						max_py = jj
-						for _i in range(ii, ii + ksize[1]):
-							for _j in range(jj, jj + ksize[2]):
-								if n_input[b][_i][_j][k] > max_v:
-									max_v = n_input[b][_i][_j][k]
-									max_px = _i
-									max_py = _j
-						output[b][max_px][max_py][k] += output_grad[b][i][j][k]
-
+		up, down, left, right = (n_h - input.shape[1]) // 2, (n_h - input.shape[1] + 1) // 2, (n_w - input.shape[2]) // 2, (n_w - input.shape[2] + 1) // 2
+		n_input = zero_padding_expand(input, up = up, down = down, left = left, right = right) # the tensor used for calculation
+		n_input = n_input.astype(np.float32)
+		output_grad = output_grad.astype(np.float32)
+		output = np.zeros_like(n_input, dtype = np.float32)
+		assert c_core.maxpool_grad(	get_pointer(n_input), 		n_input.shape[0], 		n_input.shape[1], 		n_input.shape[2], 		n_input.shape[3], 
+									get_pointer(output_grad), 	output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3],
+									get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
+									ksize[1], 					ksize[2], 				strides[1], 			strides[2]) == 0
+		output = output[:, up : up + input.shape[1], left : left + input.shape[2], :]
 		return output
 
 
