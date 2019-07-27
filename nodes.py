@@ -76,6 +76,8 @@ class Node(object):
 		self.exe = Executor([self])
 		return self.exe.run(feed_dict)[0]
 
+	run = eval
+
 class Op(object):
 	"""Op represents operations performed on nodes."""
 	def __call__(self):
@@ -715,6 +717,95 @@ class Conv2dGrad2Op(Op):
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
+class MaxPoolOp(Op):
+	def __call__(self, value, ksize, strides, padding):
+		new_node = Op.__call__(self)
+		new_node.inputs = [value]
+		new_node.const_attr = (ksize, strides, padding)
+		return new_node
+
+	def compute(self, node, input_vals):
+		input = input_vals[0]
+		ksize, strides, padding = node.const_attr
+		assert padding == 'SAME'
+		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
+		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
+		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
+											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
+		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = input.dtype) # the tensor used for result
+		for i in range(o_h):
+			for j in range(o_w):
+				output[:, i, j, :] = np.max(n_input[:,  i * strides[1] : i * strides[1] + ksize[1], 
+														j * strides[2] : j * strides[2] + ksize[2], :], axis = (1, 2))
+		return output
+
+	def gradient(self, node, output_grad):
+		return [max_pool_grad_op(node.inputs[0], node.const_attr[0], node.const_attr[1], output_grad)]
+
+class MaxPoolGradOp(Op):
+	def __call__(self, input, ksize, strides, output_grad):
+		new_node = Op.__call__(self)
+		new_node.inputs = [input, output_grad]
+		new_node.const_attr = (ksize, strides)
+		return new_node
+
+	def compute(self, node, input_vals):
+		"""may be faster by using C"""
+		input, output_grad = input_vals
+		ksize, strides = node.const_attr
+		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
+		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
+		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
+											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
+		output = np.zeros_like(input)
+		for b in range(output_grad.shape[0]):
+			for i in range(output_grad.shape[1]):
+				for j in range(output_grad.shape[2]):
+					for k in range(output_grad.shape[3]):
+						ii = i * strides[1]
+						jj = j * strides[2]
+						max_v = n_input[b][ii][jj][k]
+						max_px = ii
+						max_py = jj
+						for _i in range(ii, ii + ksize[1]):
+							for _j in range(jj, jj + ksize[2]):
+								if n_input[b][_i][_j][k] > max_v:
+									max_v = n_input[b][_i][_j][k]
+									max_px = _i
+									max_py = _j
+						output[b][max_px][max_py][k] += output_grad[b][i][j][k]
+
+		return output
+
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
+
+class ReshapeOp(Op):
+	def __call__(self, tensor, shape):
+		new_node = Op.__call__(self)
+		new_node.inputs = [tensor]
+		new_node.const_attr = shape
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.reshape(input_vals, node.const_attr)
+
+	def gradient(self, node, output_grad):
+		return [reshape_to_tensor_op(output_grad, node.inputs[0])]
+
+class ReshapeToTensorOp(Op):
+	"""tensor1 -> tensor2"""
+	def __call__(self, tensor1, tensor2):
+		new_node = Op.__call__(self)
+		new_node.inputs = [tensor1, tensor2]
+		return new_node
+
+	def compute(self, node, input_vals):
+		return np.reshape(input_vals[0], input_vals[1].shape)
+
+	def gradient(self, node, output_grad):
+		raise NotImplementedError
 
 # Create global singletons of operators.
 adam_calc_op = AdamCalcOp()
@@ -750,13 +841,16 @@ zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
 conv2d_grad_1_op = Conv2dGrad1Op()
 conv2d_grad_2_op = Conv2dGrad2Op()
-
+max_pool_grad_op = MaxPoolGradOp()
+reshape = ReshapeOp()
+reshape_to_tensor_op = ReshapeToTensorOp()
 
 class nn:
 	conv2d = Conv2dOp()
 	relu = ReluOp()
 	softmax = SoftmaxJointOp() # available gradient
 	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
+	max_pool = MaxPoolOp()
 
 
 def SoftmaxCalcFunc(tensor):

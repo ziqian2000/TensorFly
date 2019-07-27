@@ -38,6 +38,7 @@ class Executor:
 
 		# Collect node values.
 		node_val_results = [node_to_val_map[node] for node in self.eval_node_list]
+
 		return node_val_results
 
 class Session:
