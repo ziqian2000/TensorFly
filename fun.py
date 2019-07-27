@@ -94,4 +94,5 @@ class train:
 
 
 def random_normal(shape, mean = 0.0, stddev = 1.0, dtype = float32, seed = None, name = None):
+	# np.random.seed(123)
 	return np.random.normal(loc = mean, scale = stddev, size = shape).astype(dtype)

@@ -589,7 +589,7 @@ class ReluOp(Op):
 		return np.maximum(input_vals[0], 0)
 
 	def gradient(self, node, output_grad):
-		return [output_grad * relu_gradient(node)]
+		return [output_grad * relu_gradient(node.inputs[0])]
 
 class ReluGradientOp():
 	def __call__(self, tensor):
@@ -610,7 +610,8 @@ class SoftmaxCrossEntropyWithLogitsOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		log_node = np.log(SoftmaxCalcFunc(input_vals[0]))
+		tmp = SoftmaxCalcFunc(input_vals[0])
+		log_node = np.log(tmp)
 		return -np.sum(log_node * input_vals[1], axis = -1, keepdims = True)
 
 	def gradient(self, node, output_grad):
@@ -732,7 +733,7 @@ class MaxPoolOp(Op):
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
 		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
 											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
-		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = input.dtype) # the tensor used for result
+		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]]) # the tensor used for result
 		for i in range(o_h):
 			for j in range(o_w):
 				output[:, i, j, :] = np.max(n_input[:,  i * strides[1] : i * strides[1] + ksize[1], 
@@ -779,7 +780,7 @@ class ReshapeOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		return np.reshape(input_vals, node.const_attr)
+		return np.reshape(input_vals[0], node.const_attr)
 
 	def gradient(self, node, output_grad):
 		return [reshape_to_tensor_op(output_grad, node.inputs[0])]
@@ -797,6 +798,10 @@ class ReshapeToTensorOp(Op):
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
+class DropOutOp(Op):
+	pass
+
+
 # Create global singletons of operators.
 adam_calc_op = AdamCalcOp()
 adaptive_broadcast_to_op = AdaptiveBroadcastToOp()
@@ -806,12 +811,15 @@ argmax = ArgMaxOp()
 assign = AssignOp()
 cast = CastOp()
 constant = ConstantOp()
+conv2d_grad_1_op = Conv2dGrad1Op()
+conv2d_grad_2_op = Conv2dGrad2Op()
 div_op = DivOp()
 equal = EqualOp()
 exp = ExpOp()
 global_variables_initializer = VariableInitOp()
 log = LogOp()
 matmul = MatMulOp()
+max_pool_grad_op = MaxPoolGradOp()
 mul_byconst_op = MulByConstOp()
 mul_op = MulOp()
 neg_op = NegOp()
@@ -823,17 +831,14 @@ reduce_mean = ReduceMeanOp()
 reduce_shape = ReduceShapeOp()
 reduce_sum = ReduceSumOp()
 relu_gradient = ReluGradientOp()
+reshape = ReshapeOp()
+reshape_to_tensor_op = ReshapeToTensorOp()
 softmax_calc_op = SoftmaxCalcOp() # unavailable gradient
 sqrt_op = SqrtOp()
 sub_op = SubOp()
 Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
-conv2d_grad_1_op = Conv2dGrad1Op()
-conv2d_grad_2_op = Conv2dGrad2Op()
-max_pool_grad_op = MaxPoolGradOp()
-reshape = ReshapeOp()
-reshape_to_tensor_op = ReshapeToTensorOp()
 
 class nn:
 	conv2d = Conv2dOp()
@@ -841,6 +846,7 @@ class nn:
 	softmax = SoftmaxJointOp() # available gradient
 	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
 	max_pool = MaxPoolOp()
+	dropout = DropOutOp()
 
 
 def SoftmaxCalcFunc(tensor):
