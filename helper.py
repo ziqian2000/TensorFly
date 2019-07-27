@@ -32,7 +32,7 @@ def sum_node_list(node_list):
 
 def zero_padding_expand(tensor, up, down, left, right):
 	"""expand dimension 1 and 2 with zero padding"""
-	n_tensor = np.zeros([tensor.shape[0], tensor.shape[1] + up + down, tensor.shape[2] + left + right, tensor.shape[3]], dtype = tensor)
+	n_tensor = np.zeros([tensor.shape[0], tensor.shape[1] + up + down, tensor.shape[2] + left + right, tensor.shape[3]], dtype = tensor.dtype)
 	n_tensor[:, up : up + tensor.shape[1], left : left + tensor.shape[2], :] = tensor[:, :, :, :]
 	return n_tensor
 
