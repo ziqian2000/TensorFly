@@ -618,18 +618,6 @@ class SoftmaxCrossEntropyWithLogitsOp(Op):
 		"""as the second gradient is useless so I just return zeros to make it faster"""
 		return [output_grad * (softmax_calc_op(node.inputs[0]) - node.inputs[1]), zeroslike_op(node.inputs[1])]
 
-class PowOp(Op):
-	def __call__(self, x, y):
-		new_node = Op.__call__(self)
-		new_node.inputs = [x, y]
-		return new_node
-
-	def compute(self, node, input_vals):
-		return np.pow(x, y)
-
-	def gradient(self, node, output_grad):
-		raise NotImplementedError
-
 class SqrtOp(Op):
 	def __call__(self, x):
 		new_node = Op.__call__(self)
@@ -798,8 +786,17 @@ class ReshapeToTensorOp(Op):
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
 
-class DropOutOp(Op):
-	pass
+class DropOutMatOp(Op):
+	def __call__(self, keep_prob, x):
+		new_node = Op.__call__(self)
+		new_node.inputs = [keep_prob, x]
+		return new_node
+
+	def compute(self, node, input_vals):
+		return (np.random.uniform(size = input_vals[1].shape) < input_vals[0]).astype(np.int)
+
+	def gradient(self, node, output_grad):
+		return [zeroslike_op(node.inputs[0]), zeroslike_op(node.inputs[1])]
 
 
 # Create global singletons of operators.
@@ -826,7 +823,6 @@ neg_op = NegOp()
 oneslike_op = OnesLikeOp()
 pack = PackOp()
 placeholder = PlaceholderOp()
-pow_op = PowOp()
 reduce_mean = ReduceMeanOp()
 reduce_shape = ReduceShapeOp()
 reduce_sum = ReduceSumOp()
@@ -839,6 +835,7 @@ sub_op = SubOp()
 Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
+dropout_mat_op = DropOutMatOp()
 
 class nn:
 	conv2d = Conv2dOp()
@@ -846,7 +843,7 @@ class nn:
 	softmax = SoftmaxJointOp() # available gradient
 	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
 	max_pool = MaxPoolOp()
-	dropout = DropOutOp()
+	def dropout(x, keep_prob): return x * dropout_mat_op(keep_prob, x) / keep_prob
 
 
 def SoftmaxCalcFunc(tensor):
