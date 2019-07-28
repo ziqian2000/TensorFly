@@ -1,0 +1,1 @@
+gcc -o tensorfly/core.so -shared -fPIC -fopenmp tensorfly/core.c -lopenblas -O4

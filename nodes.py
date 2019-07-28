@@ -302,6 +302,8 @@ class ConstantOp(Op):
 		new_node = Op.__call__(self)
 		if not isinstance(value, np.ndarray):
 			value = np.array(value)
+		if(shape != None):
+			value = np.ones(shape = shape) * value
 		if(dtype != None):
 			value = value.astype(dtype)
 		new_node.const_attr = value
