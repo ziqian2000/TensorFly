@@ -739,7 +739,6 @@ class MaxPoolGradOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		"""may be faster by using C"""
 		input, output_grad = input_vals
 		ksize, strides = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
