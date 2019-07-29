@@ -214,7 +214,7 @@ class MulByConstOp(Op):
 
 class MatMulOp(Op):
 	"""Op to matrix multiply two nodes."""
-	def __call__(self, node_A, node_B, trans_A=False, trans_B=False):
+	def __call__(self, node_A, node_B, trans_A = False, trans_B = False):
 		"""Create a new node that is the result a matrix multiple of two input nodes.
 		Parameters
 		----------
@@ -235,10 +235,11 @@ class MatMulOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Given values of input nodes, return result of matrix multiplication."""
-		
-		assert len(input_vals) == 2
-		m0 = input_vals[0] if node.matmul_attr_trans_A == False else np.transpose(input_vals[0])
-		m1 = input_vals[1] if node.matmul_attr_trans_B == False else np.transpose(input_vals[1])
+		m0 = input_vals[0] if not node.matmul_attr_trans_A else np.transpose(input_vals[0])
+		m1 = input_vals[1] if not node.matmul_attr_trans_B else np.transpose(input_vals[1])
+		# m = np.zeros(shape = (m0.shape[0], m1.shape[1]))
+		# c_core.matmul(get_pointer(m0), get_pointer(m1), get_pointer(m), m0.shape[0], m0.shape[1], m1.shape[1]);
+		# return m
 		return np.matmul(m0, m1)
 
 	def gradient(self, node, output_grad):
@@ -246,7 +247,8 @@ class MatMulOp(Op):
 			
 		Useful formula: if Y=AB, then dA=dY B^T, dB=A^T dY
 		"""
-		return [matmul(output_grad, node.inputs[1], False, True), matmul(node.inputs[0], output_grad, True, False)]
+		return [matmul(output_grad, node.inputs[1], False, not node.matmul_attr_trans_B), 
+				matmul(node.inputs[0], output_grad, not node.matmul_attr_trans_A, False)]
 
 class DivOp(Op):
 	def __call__(self, node_A, node_B):

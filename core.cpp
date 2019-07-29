@@ -1,5 +1,26 @@
-#include <stdio.h>
+#include <cstdio>
+#include <cblas.h>
 
+extern "C"
+int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float alpha = 1.0, float beta = 0.0)
+{
+	/*
+		 cblas_sgemm(order,transA,transB,M,N,K,ALPHA,A,LDA,B,LDB,BETA,C,LDC);
+		 alpha =1,beta =0 的情况下，等于两个矩阵相成。
+		 第一参数 oreder 候选值 有ClasRowMajow 和ClasColMajow 这两个参数决定一维数组怎样存储在内存中,一般用ClasRowMajow
+		 参数 transA和transB ：表示矩阵A，B是否进行转置。候选参数 CblasTrans 和CblasNoTrans.
+		 参数M：表示 A或C的行数。如果A转置，则表示转置后的行数
+		 参数N：表示 B或C的列数。如果B转置，则表示转置后的列数。
+		 参数K：表示 A的列数或B的行数（A的列数=B的行数）。如果A转置，则表示转置后的列数。
+		 参数LDA：表示A的列数，与转置与否无关。
+		 参数LDB：表示B的列数，与转置与否无关。
+		 参数LDC：始终=N
+	*/
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, n, m, k, alpha, matA, k, matB, m, beta, matC, m);
+    return 0;
+}
+
+extern "C"
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
@@ -61,6 +82,7 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 	return 0;
 }
 
+extern "C"
 int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 				float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
 				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c)
