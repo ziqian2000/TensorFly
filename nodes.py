@@ -436,10 +436,11 @@ class AdaptiveBroadcastToOp(Op):
 		if axis is None:
 			return np.ones(input_vals[1].shape) * val
 		else:
-			ex_val = np.expand_dims(val, axis = axis)
-			for i in range(np.shape(input_vals[1])[axis] - 1):
-				ex_val = np.insert(ex_val, 0, val, axis = axis)
-			return ex_val
+			# ex_val = np.expand_dims(val, axis = axis)
+			# for i in range(np.shape(input_vals[1])[axis] - 1):
+			# 	ex_val = np.insert(ex_val, 0, val, axis = axis)
+			# return ex_val
+			return np.broadcast_to(np.expand_dims(val, axis = axis), input_vals[1].shape)
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
