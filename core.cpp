@@ -156,7 +156,7 @@ int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 
 				++idx;
 
-				float *ptr_input_cur = ptr_input_batch + h * input_batch_h_size + w * input_c;
+				float *ptr_input_cur = ptr_input_batch + _h * input_batch_h_size + _w * input_c;
 				float *ptr_output_cur = ptr_output_batch + h / stride_h * output_batch_h_size + w / stride_w * output_c;
 				float *ptr_pos_cur = ptr_pos_batch + h / stride_h * output_batch_h_size + w / stride_w * output_c;
 
@@ -181,7 +181,7 @@ extern "C"
 int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
 			 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
 			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-	 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w)
+	 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w, 	int up, 		int left)
 {
 	int grad_batch_size = grad_h * grad_w * grad_c;
 	int grad_batch_h_size = grad_w * grad_c;
@@ -198,15 +198,17 @@ int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos
 													  ptr_pos_batch += grad_batch_size,
 													  ptr_output_batch += output_batch_size)
 	{
-		for(int h = 0; h < output_h; h++)
+		for(int _h = 0; _h < output_h; _h++)
 		{
-			for(int w = 0; w < output_w; w++)
+			for(int _w = 0; _w < output_w; _w++)
 			{
+				int h = _h + up, w = _w + left;
+
 				++idx;
 
 				float *ptr_grad_cur = ptr_grad_batch + h / stride_h * grad_batch_h_size + w / stride_w * grad_c;
 				float *ptr_pos_cur = ptr_pos_batch + h / stride_h * grad_batch_h_size + w / stride_w * grad_c;
-				float *ptr_output_cur = ptr_output_batch + h * output_batch_h_size + w * output_c;
+				float *ptr_output_cur = ptr_output_batch + _h * output_batch_h_size + _w * output_c;
 
 				for(int c = 0; c < output_c; c++)
 				{

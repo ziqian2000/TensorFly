@@ -754,7 +754,8 @@ class MaxPoolGradOp(Op):
 		assert c_core.maxpool_grad(	get_pointer(pos), 			pos.shape[0], 			pos.shape[1], 			pos.shape[2], 			pos.shape[3], 
 									get_pointer(output_grad), 	output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3],
 									get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
-									ksize[1],					ksize[2],				strides[1],				strides[2]) == 0
+									ksize[1],					ksize[2],				strides[1],				strides[2],
+									(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2) == 0
 		return output
 
 
