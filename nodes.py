@@ -724,40 +724,37 @@ class MaxPoolOp(Op):
 		assert padding == 'SAME'
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
-											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
-		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]]) # the tensor used for result
-		for i in range(o_h):
-			for j in range(o_w):
-				output[:, i, j, :] = np.max(n_input[:,  i * strides[1] : i * strides[1] + ksize[1], 
-														j * strides[2] : j * strides[2] + ksize[2], :], axis = (1, 2))
+		input = input.astype(np.float32)
+		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32) # the tensor used for result
+		node.pos = np.zeros_like(output, dtype = np.float32)
+		assert c_core.maxpool(  get_pointer(input),		input.shape[0],		input.shape[1],		input.shape[2],		input.shape[3],
+								get_pointer(output),	output.shape[0],	output.shape[1],	output.shape[2],	output.shape[3],
+								get_pointer(node.pos),	ksize[1],			ksize[2],			strides[1],			strides[2],
+								(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2) == 0
 		return output
 
 	def gradient(self, node, output_grad):
-		return [max_pool_grad_op(node.inputs[0], node.const_attr[0], node.const_attr[1], output_grad)]
+		return [max_pool_grad_op(node.inputs[0], node.const_attr[0], node.const_attr[1], output_grad, node)]
 
 class MaxPoolGradOp(Op):
-	def __call__(self, input, ksize, strides, output_grad):
+	def __call__(self, input, ksize, strides, output_grad, ori_node):
 		new_node = Op.__call__(self)
 		new_node.inputs = [input, output_grad]
-		new_node.const_attr = (ksize, strides)
+		new_node.const_attr = (ksize, strides, ori_node)
 		return new_node
 
 	def compute(self, node, input_vals):
 		input, output_grad = input_vals
-		ksize, strides = node.const_attr
+		ksize, strides, ori_node = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		up, down, left, right = (n_h - input.shape[1]) // 2, (n_h - input.shape[1] + 1) // 2, (n_w - input.shape[2]) // 2, (n_w - input.shape[2] + 1) // 2
-		n_input = zero_padding_expand(input, up = up, down = down, left = left, right = right) # the tensor used for calculation
-		n_input = n_input.astype(np.float32)
 		output_grad = output_grad.astype(np.float32)
-		output = np.zeros_like(n_input, dtype = np.float32)
-		assert c_core.maxpool_grad(	get_pointer(n_input), 		n_input.shape[0], 		n_input.shape[1], 		n_input.shape[2], 		n_input.shape[3], 
+		output = np.zeros_like(input, dtype = np.float32)
+		pos = ori_node.pos
+		assert c_core.maxpool_grad(	get_pointer(pos), 			pos.shape[0], 			pos.shape[1], 			pos.shape[2], 			pos.shape[3], 
 									get_pointer(output_grad), 	output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3],
 									get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
-									ksize[1], 					ksize[2], 				strides[1], 			strides[2]) == 0
-		output = output[:, up : up + input.shape[1], left : left + input.shape[2], :]
+									ksize[1],					ksize[2],				strides[1],				strides[2]) == 0
 		return output
 
 

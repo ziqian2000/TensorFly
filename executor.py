@@ -34,11 +34,11 @@ class Executor:
 
 		for node in topo_order:
 			if node not in node_to_val_map:
-				import time
-				_t = time.clock()
-				print(type(node.op))
+				# import time
+				# _t = time.clock()
+				# print(type(node.op))
 				node_to_val_map[node] = node.op.compute(node, [node_to_val_map[p] for p in node.inputs])
-				print("END", time.clock() - _t)
+				# print("END", time.clock() - _t)
 
 		# Collect node values.
 		node_val_results = [node_to_val_map[node] for node in self.eval_node_list]

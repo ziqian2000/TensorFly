@@ -130,62 +130,96 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 }
 
 extern "C"
-int maxpool_grad(   float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
-			 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
-			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-			 		int ksize_h, 	int ksize_w,		int stride_h, 	int stride_w)
+int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
+	 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+	 		float* pos,		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
+	 		int up, 		int left)
 {
-	
 	int input_batch_size = input_h * input_w * input_c;
 	int input_batch_h_size = input_w * input_c;
+	int output_batch_size = output_h * output_w * output_c;
+	int output_batch_h_size = output_w * output_c;
+	int idx = 0;
+	float *ptr_input_batch = input;
+	float *ptr_output_batch = output;
+	float *ptr_pos_batch = pos;
+	memset(output, 254, sizeof(float) * output_batch * output_batch_size);
+	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += input_batch_size, 
+													 ptr_output_batch += output_batch_size, 
+													 ptr_pos_batch += output_batch_size)
+	{
+		for(int _h = 0; _h < input_h; _h++)
+		{
+			for(int _w = 0; _w < input_w; _w++)
+			{
+				int h = _h + up, w = _w + left;
+
+				++idx;
+
+				float *ptr_input_cur = ptr_input_batch + h * input_batch_h_size + w * input_c;
+				float *ptr_output_cur = ptr_output_batch + h / stride_h * output_batch_h_size + w / stride_w * output_c;
+				float *ptr_pos_cur = ptr_pos_batch + h / stride_h * output_batch_h_size + w / stride_w * output_c;
+
+				for(int c = 0; c < input_c; c++)
+				{
+					if(*ptr_input_cur > *ptr_output_cur)
+					{
+						*ptr_output_cur	= *ptr_input_cur;
+						*ptr_pos_cur = idx;
+					}
+					ptr_input_cur++;
+					ptr_output_cur++;
+					ptr_pos_cur++;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+extern "C"
+int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
+			 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
+			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+	 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w)
+{
 	int grad_batch_size = grad_h * grad_w * grad_c;
 	int grad_batch_h_size = grad_w * grad_c;
+	int output_batch_size = output_h * output_w * output_c;
+	int output_batch_h_size = output_w * output_c;
 
-	float *ptr_input_batch = input;
+	int idx = 0;
+
+	float *ptr_pos_batch = pos;
 	float *ptr_grad_batch = grad;
+	float *ptr_output_batch = output;
 
-	for(int batch = 0; batch < input_batch; ++batch)
+	for(int batch = 0; batch < output_batch; batch++, ptr_grad_batch += grad_batch_size, 
+													  ptr_pos_batch += grad_batch_size,
+													  ptr_output_batch += output_batch_size)
 	{
-		float *ptr_input_batch_h = ptr_input_batch;
-		float *ptr_grad_batch_h = ptr_grad_batch;
-		for(int g_h = 0; g_h < grad_h; ++g_h)
+		for(int h = 0; h < output_h; h++)
 		{
-			float *ptr_input_batch_h_w = ptr_input_batch_h;
-			float *ptr_grad_batch_h_w = ptr_grad_batch_h;
-			for(int g_w = 0; g_w < grad_w; ++g_w)
+			for(int w = 0; w < output_w; w++)
 			{
-				float *ptr_input_batch_h_w_c = ptr_input_batch_h_w;
-				float *ptr_grad_batch_h_w_c = ptr_grad_batch_h_w;
-				for(int c = 0; c < input_c; ++c)
-				{
-					/* find the position */
-					float *ptr_input_batch_h_w_c_h2 = ptr_input_batch_h_w_c;
-					float *pos = ptr_input_batch_h_w_c;
-					for(int h = 0; h < ksize_h; ++h)
-					{
-						float *ptr_input_batch_h_w_c_h2_w2 = ptr_input_batch_h_w_c_h2;
-						for(int w = 0; w < ksize_w; ++w)
-						{
-							if(*ptr_input_batch_h_w_c_h2_w2 > *pos)
-								pos = ptr_input_batch_h_w_c_h2_w2;
-							ptr_input_batch_h_w_c_h2_w2 += input_c;
-						}
-						ptr_input_batch_h_w_c_h2 += input_batch_h_size;
-					}
-					/* find the position */
-					output[pos - input] += *ptr_grad_batch_h_w_c;
-					++ptr_input_batch_h_w_c;
-					++ptr_grad_batch_h_w_c;
-				}
-				ptr_input_batch_h_w += input_c * stride_w;
-				ptr_grad_batch_h_w += grad_c;
-			}
-			ptr_input_batch_h += input_batch_h_size * stride_h;
-			ptr_grad_batch_h += grad_batch_h_size;
-		}
-		ptr_input_batch += input_batch_size;
-		ptr_grad_batch += grad_batch_size;
-	}
+				++idx;
 
+				float *ptr_grad_cur = ptr_grad_batch + h / stride_h * grad_batch_h_size + w / stride_w * grad_c;
+				float *ptr_pos_cur = ptr_pos_batch + h / stride_h * grad_batch_h_size + w / stride_w * grad_c;
+				float *ptr_output_cur = ptr_output_batch + h * output_batch_h_size + w * output_c;
+
+				for(int c = 0; c < output_c; c++)
+				{
+					if(*ptr_pos_cur == idx)
+					{
+						*ptr_output_cur += *ptr_grad_cur;
+					}
+					ptr_grad_cur++;
+					ptr_output_cur++;
+					ptr_pos_cur++;
+				}
+			}
+		}
+	}
 	return 0;
 }
