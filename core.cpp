@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <iostream>
 #include <cblas.h>
 
 extern "C"
@@ -21,12 +22,56 @@ inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, fl
     return 0;
 }
 
+inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &filter_c, int &filter_o_c)
+{
+	float *tmp = new float[filter_h * filter_w * filter_c * filter_o_c];
+	for(int h = 0; h < filter_h; h++)
+	{
+		for(int w = 0; w < filter_w; w++)
+		{
+			float *tmp_h_w = 	tmp + h * filter_w * filter_c * filter_o_c + 	w * filter_c * filter_o_c;
+			float *filter_h_w = filter + h * filter_w * filter_c * filter_o_c + w * filter_c * filter_o_c;
+			for(int c = 0; c < filter_c; c++)
+				for(int oc = 0; oc < filter_o_c; oc++)
+					tmp_h_w[oc * filter_c + c] = *filter_h_w++;
+		}
+	}
+	std::swap(filter_c, filter_o_c);
+	/* 
+		Attention! 
+		Do not delete 'filter' here as the 'filter' is only a pointer copied from py.
+		You'll get an RE if you delete it because numpy will delete it again.
+	*/
+	// delete[] filter; 
+	filter = tmp;
+}
+
+inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
+{
+	float *tmp = new float[filter_h * filter_w * filter_c * filter_o_c];
+	int copy_size = sizeof(float) * filter_c * filter_o_c;
+	int h_size = filter_w * filter_c * filter_o_c;
+	int w_size = filter_c * filter_o_c;
+	for(int h = 0; h < filter_h / 2; h++)
+		for(int w = 0; w < filter_w; w++)
+		{
+			for(int c = 0; c < w_size; c++)
+				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+		}
+}
+
 extern "C"
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-			int stride_h, 	int stride_w)
+			int stride_h, 	int stride_w, 		int need_to_rotate)
 {
+	if(need_to_rotate) // for gradient calculation
+	{
+		// don't change the order
+		swap_dim2_and_dim3(filter, filter_h, filter_w, filter_c, filter_o_c);
+		rotate_180(filter, filter_h, filter_w, filter_c, filter_o_c);
+	}
 	
 	int batch_size = input_h * input_w * input_c;
 	int batch_h_size = input_w * input_c;
@@ -42,6 +87,7 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 
 	float *ptr_input_batch = input;
 	float *ptr_output_batch = output;
+
 	float *img = new float[dim1 * dim2]; // temporary vector for calculation
 
 	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_output_batch += output_batch_size) // for each patch
@@ -63,7 +109,7 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 		}
 		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3);
 	}
-	delete []img;
+	delete[] img;
 	return 0;
 }
 
