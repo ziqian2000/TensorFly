@@ -85,7 +85,7 @@ extern "C"
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-			int stride_h, 	int stride_w, 		int need_to_rotate)
+			int stride_h, 	int stride_w, 		int up,			int left, 		int down, 		int right, 		int need_to_rotate)
 {
 	if(need_to_rotate) // for gradient calculation
 	{
@@ -94,14 +94,13 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 	}
 
 	// for(int i = 0; i < 5; i++) printf("%lf ",filter[i]); puts("");
-	
+
 	int batch_size = input_h * input_w * input_c;
 	int batch_h_size = input_w * input_c;
 	int batch_h_w_size = input_c;
 	int output_batch_size = output_h * output_w * output_c;
 
-	int move_size = filter_w * input_c;
-	int copy_size = move_size * sizeof(float);
+	int copy_size = input_c * sizeof(float);
 
 	int dim1 = output_h * output_w;
 	int dim2 = filter_h * filter_w * filter_c;
@@ -110,22 +109,29 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 	float *ptr_input_batch = input;
 	float *ptr_output_batch = output;
 
-	float *img = new float[dim1 * dim2]; // temporary vector for calculation
+	float *img = new float[dim1 * dim2 * 2]; // temporary vector for calculation
+	memset(img, 0, sizeof(float) * dim1 * dim2); // 优化！！！！！！！！！！！！！！！
 
 	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_output_batch += output_batch_size) // for each patch
 	{
-		float *ptr_img = img;
 		float *ptr_input_batch_h = ptr_input_batch;
-		for(int i_h = 0; i_h < output_h; i_h ++, ptr_input_batch_h += batch_h_size * stride_h)
+		for(int _i_h = -up; _i_h < input_h + down - up; _i_h ++)
 		{
-			float *ptr_input_batch_h_w = ptr_input_batch_h;
-			for(int i_w = 0; i_w < output_w; i_w ++, ptr_input_batch_h_w += batch_h_w_size * stride_w)
+			for(int _i_w = -left; _i_w < input_w + right - left; _i_w ++)
 			{
-				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h_w;
-				for(int i_h2 = 0; i_h2 < filter_h; i_h2++, ptr_input_batch_h_w_h2 += batch_h_size)
+				int i_h = _i_h + up, i_w = _i_w + left;
+				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * input_c;
+				float *ptr_img = img + (i_h * output_w + i_w) * filter_h * filter_w * filter_c;
+
+				int w_len = std::min(output_w, _i_w + filter_w) - std::max(0, _i_w);
+				int shift_size = (std::max(0, _i_w) - _i_w) * input_c, move_size = w_len * input_c;
+
+				for(int i_h2 = 0, i_h2_ = std::min(filter_h, output_h - _i_h); i_h2 < i_h2_; i_h2++, 
+																							ptr_input_batch_h_w_h2 += batch_h_size,
+																							ptr_img += move_size)
 				{
-					memcpy(ptr_img, ptr_input_batch_h_w_h2, copy_size);
-					ptr_img += move_size;
+					if(i_h2 + _i_h < 0) continue;
+					memcpy(ptr_img, ptr_input_batch_h_w_h2 + shift_size, w_len * copy_size);
 				}
 			}
 		}

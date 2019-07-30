@@ -860,17 +860,17 @@ def SoftmaxCalcFunc(tensor):
 def Conv2dFunc(input, filter, strides, padding, need_to_rotate = False):
 	n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
 	n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
-	n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
-										left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
-
-	n_input = n_input.astype(np.float32)
+	# n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
+	# 									left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
+	input = input.astype(np.float32)
 	filter = filter.astype(np.float32)
 	if(need_to_rotate):
-		output = np.zeros([input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
+		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
 	else:
-		output = np.zeros([input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result (2)
-	assert c_core.conv2d(	get_pointer(n_input), 	n_input.shape[0], 	n_input.shape[1], 	n_input.shape[2], 	n_input.shape[3], 
+		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result (2)
+	assert c_core.conv2d(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2], 	input.shape[3], 
 							get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
 							get_pointer(output),	output.shape[0], 	output.shape[1],	output.shape[2],	output.shape[3],
-							strides[1], 			strides[2], 		int(need_to_rotate)) == 0
+							strides[1], 			strides[2], 		(n_h - input.shape[1]) // 2, 			(n_w - input.shape[2]) // 2,
+							(n_h - input.shape[1] + 1) // 2,			(n_w - input.shape[2] + 1) // 2,		int(need_to_rotate)) == 0
 	return output
