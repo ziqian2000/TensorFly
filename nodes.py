@@ -59,7 +59,8 @@ class Node(object):
 		return new_node
 
 	def __truediv__(self, other):
-		assert isinstance(other, Node)
+		if not isinstance(other, Node):
+			other = constant(other)
 		return div_op(self, other)
 
 	def __neg__(self):
@@ -814,6 +815,7 @@ constant = ConstantOp()
 conv2d_grad_1_op = Conv2dGrad1Op()
 conv2d_grad_2_op = Conv2dGrad2Op()
 div_op = DivOp()
+dropout_mat_op = DropOutMatOp()
 equal = EqualOp()
 exp = ExpOp()
 global_variables_initializer = VariableInitOp()
@@ -838,7 +840,6 @@ sub_op = SubOp()
 Variable = VariableOp()
 zeros = ZerosOp()
 zeroslike_op = ZerosLikeOp()
-dropout_mat_op = DropOutMatOp()
 
 class nn:
 	conv2d = Conv2dOp()
