@@ -860,8 +860,6 @@ def SoftmaxCalcFunc(tensor):
 def Conv2dFunc(input, filter, strides, padding, need_to_rotate = False):
 	n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
 	n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
-	# n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
-	# 									left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
 	input = input.astype(np.float32)
 	filter = filter.astype(np.float32)
 	if(need_to_rotate):
