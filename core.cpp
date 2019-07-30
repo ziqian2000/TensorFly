@@ -30,11 +30,11 @@ inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &
 	{
 		for(int w = 0; w < filter_w; w++)
 		{
-			float *tmp_h_w = 	tmp + h * filter_w * filter_c * filter_o_c + 	w * filter_c * filter_o_c;
-			float *filter_h_w = filter + h * filter_w * filter_c * filter_o_c + w * filter_c * filter_o_c;
+			float *tmp_h_w = 	tmp + 	 	h * filter_w * filter_c * filter_o_c +		w * filter_c * filter_o_c;
+			float *filter_h_w = filter + 	h * filter_w * filter_c * filter_o_c +		w * filter_c * filter_o_c;
 			for(int c = 0; c < filter_c; c++)
 				for(int oc = 0; oc < filter_o_c; oc++)
-					tmp_h_w[oc * filter_c + c] = *filter_h_w++;
+					tmp_h_w[oc * filter_c + c] = filter_h_w[c * filter_o_c + oc];
 		}
 	}
 	std::swap(filter_c, filter_o_c);
@@ -49,7 +49,6 @@ inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &
 
 inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
-	int copy_size = sizeof(float) * filter_c * filter_o_c;
 	int h_size = filter_w * filter_c * filter_o_c;
 	int w_size = filter_c * filter_o_c;
 	for(int h = 0; h < filter_h / 2; h++)
@@ -58,6 +57,15 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 			for(int c = 0; c < w_size; c++)
 				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
 		}
+	if(filter_h % 2)
+	{
+		int h = filter_h / 2;
+		for(int w = 0; w < filter_w / 2; w++)
+		{
+			for(int c = 0; c < w_size; c++)
+				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+		}
+	}
 }
 
 extern "C"
@@ -68,10 +76,11 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 {
 	if(need_to_rotate) // for gradient calculation
 	{
-		// don't change the order
-		swap_dim2_and_dim3(filter, filter_h, filter_w, filter_c, filter_o_c);
-		rotate_180(filter, filter_h, filter_w, filter_c, filter_o_c);
+		swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
+		rotate_180(			filter, filter_h, filter_w, filter_c, filter_o_c);
 	}
+
+	// for(int i = 0; i < 5; i++) printf("%lf ",filter[i]); puts("");
 	
 	int batch_size = input_h * input_w * input_c;
 	int batch_h_size = input_w * input_c;

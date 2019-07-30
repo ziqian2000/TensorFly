@@ -678,9 +678,10 @@ class Conv2dGrad1Op(Op):
 	def compute(self, node, input_vals):
 		"""maybe it can return zeros since it can not be changed"""
 		assert input_vals[1].shape[0] % 2 == 1 and input_vals[1].shape[1] % 2 == 1 # simplify
-		return Conv2dFunc(input = input_vals[0], filter = np.rot90(np.transpose(input_vals[1], (0, 1, 3, 2)), axes = (0, 1), k = 2), 
-						strides = [1,1,1,1], padding = 'SAME', need_to_rotate = False)
-		# return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = [1,1,1,1], padding = 'SAME', need_to_rotate = True)
+		# return Conv2dFunc(input = input_vals[0], filter = np.rot90(np.transpose(input_vals[1], (0, 1, 3, 2)), axes = (0, 1), k = 2), 
+		# 				strides = [1,1,1,1], padding = 'SAME', need_to_rotate = False)
+		# return Conv2dFunc(input = input_vals[0], filter = np.transpose(input_vals[1], (0, 1, 3, 2)), strides = [1,1,1,1], padding = 'SAME', need_to_rotate = True)
+		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = [1,1,1,1], padding = 'SAME', need_to_rotate = True)
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
