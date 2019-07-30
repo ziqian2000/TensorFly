@@ -23,6 +23,19 @@ inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, fl
     return 0;
 }
 
+extern "C"
+void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, bool transA, bool transB)
+{
+    if(transA)
+        transB
+            ? cblas_sgemm(CblasRowMajor, CblasTrans, CblasTrans, ma, nb, mb, 1.0, a, ma, b, mb, 0.0, c, nb)
+            : cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, ma, mb, na, 1.0, a, ma, b, mb, 0.0, c, mb);
+    else
+        transB
+            ? cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, na, nb, mb, 1.0, a, ma, b, mb, 0.0, c, nb)
+            : cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, na, mb, ma, 1.0, a, ma, b, mb, 0.0, c, mb);
+}
+
 inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &filter_c, int &filter_o_c)
 {
 	float *tmp = new float[filter_h * filter_w * filter_c * filter_o_c];

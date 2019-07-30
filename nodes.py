@@ -186,7 +186,6 @@ class MulOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Given values of two input nodes, return result of element-wise multiplication."""
-		
 		assert len(input_vals) == 2
 		return input_vals[0] * input_vals[1]
 
@@ -235,13 +234,17 @@ class MatMulOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		"""Given values of input nodes, return result of matrix multiplication."""
-		m0 = input_vals[0] if not node.matmul_attr_trans_A else np.transpose(input_vals[0])
-		m1 = input_vals[1] if not node.matmul_attr_trans_B else np.transpose(input_vals[1])
-		# m = np.zeros(shape = (m0.shape[0], m1.shape[1]))
-		# c_core.matmul(get_pointer(m0), get_pointer(m1), get_pointer(m), m0.shape[0], m0.shape[1], m1.shape[1]);
-		# return m
-		return np.matmul(m0, m1)
+		a, b = input_vals
+		na, ma = a.shape
+		nb, mb = b.shape
+		if node.matmul_attr_trans_A:
+			if node.matmul_attr_trans_B: 	c = np.ndarray(shape = (ma, nb), dtype = np.float32)
+			else:							c = np.ndarray(shape = (ma, mb), dtype = np.float32)
+		else:
+			if node.matmul_attr_trans_B:	c = np.ndarray(shape = (na, nb), dtype = np.float32)
+			else:							c = np.ndarray(shape = (na, mb), dtype = np.float32)
+		c_core.matmul_trans(get_pointer(a), get_pointer(b), get_pointer(c), na, ma, nb, mb, node.matmul_attr_trans_A, node.matmul_attr_trans_B)
+		return c
 
 	def gradient(self, node, output_grad):
 		"""Given gradient of multiply node, return gradient contributions to each input.
