@@ -4,7 +4,7 @@
 #include <cblas.h>
 
 extern "C"
-inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float alpha = 1.0, float beta = 0.0)
+inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta = 0.0)
 {
 	/*
 		 cblas_sgemm(order,transA,transB,M,N,K,ALPHA,A,LDA,B,LDB,BETA,C,LDC);
@@ -18,6 +18,7 @@ inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, fl
 		 参数LDB：表示B的列数，与转置与否无关。
 		 参数LDC：始终=N
 	*/
+	float alpha = 1.0;
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, n, m, k, alpha, matA, k, matB, m, beta, matC, m);
     return 0;
 }
@@ -48,7 +49,6 @@ inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &
 
 inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
-	float *tmp = new float[filter_h * filter_w * filter_c * filter_o_c];
 	int copy_size = sizeof(float) * filter_c * filter_o_c;
 	int h_size = filter_w * filter_c * filter_o_c;
 	int w_size = filter_c * filter_o_c;
@@ -116,62 +116,56 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 extern "C"
 int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 				float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
-				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c)
+				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c,
+				int up,			int left)
 {
-	int input_batch_h_size = input_w * input_c;
-	int input_batch_size = input_h * input_w * input_c;
+	int batch_size = input_h * input_w * input_c;
+	int batch_h_size = input_w * input_c;
+	int batch_h_w_size = input_c;
 	int grad_batch_size = grad_h * grad_w * grad_c;
 	int grad_batch_h_size = grad_w * grad_c;
 	int output_h_size = output_w * output_c * output_o_c;
 	int output_h_w_size = output_c * output_o_c;
 
+	int dim1 = output_h * output_w * output_c;
+	int dim2 = grad_h * grad_w;
+	int dim3 = output_o_c;
+
 	float *ptr_input_batch = input;
 	float *ptr_grad_batch = grad;
-	for(int batch = 0; batch < input_batch; batch++)
+
+	float *img = new float[dim1 * dim2]; // temporary vector for calculation
+	memset(img, 0, sizeof(float) * dim1 * dim2);
+
+	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_grad_batch += grad_batch_size) // for each patch
 	{
-		float* ptr_input_batch_h = ptr_input_batch;
-		float* ptr_output_h = output;
-		for(int o_h = 0; o_h < output_h; o_h++)
+		float *ptr_img = img;
+		for(int _i_h = -up, _i_h_ = output_h - up; _i_h < _i_h_; _i_h ++)
 		{
-			float *ptr_input_batch_h_w = ptr_input_batch_h;
-			float *ptr_output_h_w = ptr_output_h;
-			for(int o_w = 0; o_w < output_w; o_w++)
+			int i_h = _i_h + up;
+			for(int _i_w = -left, _i_w_ = output_w - left; _i_w < _i_w_; _i_w ++)
 			{
-
-				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h_w;
-				float *ptr_grad_batch_h = ptr_grad_batch;
-
-				for(int i_h = 0; i_h < grad_h; i_h++)
+				int i_w = _i_w + left;
+				float *ptr_input_batch_h_w_h2 = ptr_input_batch + (_i_h * input_w + _i_w) * input_c;
+				float *ptr_img_begin_pos = ptr_img + (i_h * output_w + i_w) * input_c * dim2;
+				for(int i_h2 = std::max(0, -_i_h), i_h2_ = std::min(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
 				{
-					float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2;
-					float *ptr_grad_batch_h_w = ptr_grad_batch_h;
-
-					for(int i_w = 0; i_w < grad_w; i_w++)
+					for(int i_w2 = std::max(0, -_i_w), i_w2_ = std::min(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
 					{
-						float *ptr_output_h_w_c = ptr_output_h_w;
-						for(int o_c = 0; o_c < output_c; o_c++)
+						float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + (i_h2 * input_w + i_w2) * input_c;
+						float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + i_w2;
+						for(int c = 0; c < input_c; c++)
 						{
-							for(int o_o_c = 0; o_o_c < output_o_c; o_o_c++)
-							{
-								ptr_output_h_w_c[o_o_c] += ptr_input_batch_h_w_h2_w2[o_c] * ptr_grad_batch_h_w[o_o_c];
-							}
-							ptr_output_h_w_c += output_o_c;
+							*ptr_img_begin_pos2 = ptr_input_batch_h_w_h2_w2[c];
+							ptr_img_begin_pos2 += dim2;
 						}
-						ptr_input_batch_h_w_h2_w2 += input_c;
-						ptr_grad_batch_h_w += grad_c;
 					}
-					ptr_input_batch_h_w_h2 += input_batch_h_size;
-					ptr_grad_batch_h += grad_batch_h_size;
 				}
-				ptr_output_h_w += output_h_w_size;
-				ptr_input_batch_h_w += input_c;
 			}
-			ptr_output_h += output_h_size;
-			ptr_input_batch_h += input_batch_h_size;
 		}
-		ptr_input_batch += input_batch_size;
-		ptr_grad_batch += grad_batch_size;
+		matmul(img, ptr_grad_batch, output, dim1, dim2, dim3, batch > 0 ? 1.0 : 0.0);
 	}
+	delete[] img;
 	return 0;
 }
 

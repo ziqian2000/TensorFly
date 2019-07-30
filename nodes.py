@@ -678,7 +678,9 @@ class Conv2dGrad1Op(Op):
 	def compute(self, node, input_vals):
 		"""maybe it can return zeros since it can not be changed"""
 		assert input_vals[1].shape[0] % 2 == 1 and input_vals[1].shape[1] % 2 == 1 # simplify
-		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = [1,1,1,1], padding = 'SAME', need_to_rotate = True)
+		return Conv2dFunc(input = input_vals[0], filter = np.rot90(np.transpose(input_vals[1], (0, 1, 3, 2)), axes = (0, 1), k = 2), 
+						strides = [1,1,1,1], padding = 'SAME', need_to_rotate = False)
+		# return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = [1,1,1,1], padding = 'SAME', need_to_rotate = True)
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -695,14 +697,13 @@ class Conv2dGrad2Op(Op):
 
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = 1)
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = 1)
-		n_input = zero_padding_expand(input, up = (n_h - input.shape[1]) // 2, down = (n_h - input.shape[1] + 1) // 2, 
-											left = (n_w - input.shape[2]) // 2, right = (n_w - input.shape[2] + 1) // 2) # the tensor used for calculation
-		n_input = n_input.astype(np.float32)
+		input = input.astype(np.float32)
 		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
-		assert c_core.conv2d_grad(get_pointer(n_input), 	n_input.shape[0], 		n_input.shape[1], 		n_input.shape[2], 		n_input.shape[3], 
+		assert c_core.conv2d_grad(get_pointer(input), 		input.shape[0], 		input.shape[1], 		input.shape[2], 		input.shape[3], 
 								  get_pointer(output_grad), output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3], 
-								  get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],) == 0
+								  get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
+								  (n_h - input.shape[1]) // 2, 						(n_w - input.shape[2]) // 2) == 0
 
 		return output
 
