@@ -2,9 +2,13 @@
 #include <cstring>
 #include <iostream>
 #include <thread>
+#include <cassert>
 #include <cblas.h>
 
 const int THREAD_NUM = 4;
+
+float *mem = nullptr;
+int mem_len;
 
 extern "C"
 inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta = 0.0)
@@ -41,7 +45,12 @@ void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, 
 
 inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &filter_c, int &filter_o_c)
 {
-	float *tmp = new float[filter_h * filter_w * filter_c * filter_o_c];
+	if(mem_len < filter_h * filter_w * filter_c * filter_o_c)
+	{
+		delete[] mem;
+		mem = new float[mem_len = filter_h * filter_w * filter_c * filter_o_c];
+	}
+	float *tmp = mem;
 	for(int h = 0; h < filter_h; h++)
 	{
 		for(int w = 0; w < filter_w; w++)
@@ -85,6 +94,8 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 }
 
 extern "C"
+
+extern "C"
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
@@ -95,8 +106,6 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 		swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
 		rotate_180(			filter, filter_h, filter_w, filter_c, filter_o_c);
 	}
-
-	// for(int i = 0; i < 5; i++) printf("%lf ",filter[i]); puts("");
 
 	int batch_size = input_h * input_w * input_c;
 	int batch_h_size = input_w * input_c;
@@ -112,15 +121,22 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 	float *ptr_input_batch = input;
 	float *ptr_output_batch = output;
 
-	float *img = new float[dim1 * dim2]; // temporary vector for calculation
-	memset(img, 0, sizeof(float) * dim1 * dim2); // 优化！！！！！！！！！！！！！！！
+	if(mem_len < dim1 * dim2)
+	{
+		delete[] mem;
+		mem = new float[mem_len = dim1 * dim2];
+	}
+
+	float *img = mem; // temporary vector for calculation
+	memset(img, 0, sizeof(float) * dim1 * dim2);
 
 	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_output_batch += output_batch_size) // for each patch
 	{
+
 		float *ptr_input_batch_h = ptr_input_batch;
-		for(int _i_h = -up; _i_h < input_h + - up; _i_h ++)
+		for(int _i_h = -up; _i_h < input_h - up; _i_h ++)
 		{
-			for(int _i_w = -left; _i_w < input_w + - left; _i_w ++)
+			for(int _i_w = -left; _i_w < input_w - left; _i_w ++)
 			{
 				int i_h = _i_h + up, i_w = _i_w + left;
 				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * input_c;
@@ -139,7 +155,6 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 		}
 		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3);
 	}
-	delete[] img;
 	return 0;
 }
 
@@ -164,7 +179,13 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 	float *ptr_input_batch = input;
 	float *ptr_grad_batch = grad;
 
-	float *img = new float[dim1 * dim2]; // temporary vector for calculation
+	if(mem_len < dim1 * dim2)
+	{
+		delete[] mem;
+		mem = new float[mem_len = dim1 * dim2];
+	}
+
+	float *img = mem; // temporary vector for calculation
 	memset(img, 0, sizeof(float) * dim1 * dim2);
 
 	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_grad_batch += grad_batch_size) // for each patch
@@ -180,22 +201,24 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 				float *ptr_img_begin_pos = ptr_img + (i_h * output_w + i_w) * input_c * dim2;
 				for(int i_h2 = std::max(0, -_i_h), i_h2_ = std::min(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
 				{
+					float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + std::max(0, -_i_w);
+					float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + i_h2 * input_w * input_c + std::max(0, -_i_w) * input_c;
 					for(int i_w2 = std::max(0, -_i_w), i_w2_ = std::min(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
 					{
-						float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + (i_h2 * input_w + i_w2) * input_c;
-						float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + i_w2;
+						float *tmp = ptr_img_begin_pos2;
 						for(int c = 0; c < input_c; c++)
 						{
-							*ptr_img_begin_pos2 = ptr_input_batch_h_w_h2_w2[c];
-							ptr_img_begin_pos2 += dim2;
+							*tmp = ptr_input_batch_h_w_h2_w2[c];
+							tmp += dim2;
 						}
+						++ptr_img_begin_pos2;
+						ptr_input_batch_h_w_h2_w2 += input_c;
 					}
 				}
 			}
 		}
 		matmul(img, ptr_grad_batch, output, dim1, dim2, dim3, batch > 0 ? 1.0 : 0.0);
 	}
-	delete[] img;
 	return 0;
 }
 
