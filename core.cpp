@@ -59,7 +59,7 @@ inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &
 			float *filter_h_w = filter + 	h * filter_w * filter_c * filter_o_c +		w * filter_c * filter_o_c;
 			for(int c = 0; c < filter_c; c++)
 				for(int oc = 0; oc < filter_o_c; oc++)
-					tmp_h_w[oc * filter_c + c] = filter_h_w[c * filter_o_c + oc];
+					tmp_h_w[oc * filter_c + c] = *filter_h_w++;
 		}
 	}
 	std::swap(filter_c, filter_o_c);
@@ -79,16 +79,20 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 	for(int h = 0; h < filter_h / 2; h++)
 		for(int w = 0; w < filter_w; w++)
 		{
+			float *filter_tmp1 = filter + h * h_size + w * w_size;
+			float *filter_tmp2 = filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size;
 			for(int c = 0; c < w_size; c++)
-				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+				std::swap(*filter_tmp1++, *filter_tmp2++);
 		}
 	if(filter_h % 2)
 	{
 		int h = filter_h / 2;
 		for(int w = 0; w < filter_w / 2; w++)
 		{
+			float *filter_tmp1 = filter + h * h_size + w * w_size;
+			float *filter_tmp2 = filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size;
 			for(int c = 0; c < w_size; c++)
-				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+				std::swap(*filter_tmp1++, *filter_tmp2++);
 		}
 	}
 }
@@ -139,17 +143,18 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 			for(int _i_w = -left; _i_w < input_w - left; _i_w ++)
 			{
 				int i_h = _i_h + up, i_w = _i_w + left;
-				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * input_c;
-				float *ptr_img = img + (i_h * output_w + i_w) * filter_h * filter_w * filter_c;
+				int shift_size = (std::max(0, _i_w) - _i_w) * input_c, move_size = filter_w * input_c;
+				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * input_c + shift_size;
+				float *ptr_img = img + (i_h * output_w + i_w) * filter_h * filter_w * filter_c + shift_size;
 
 				int w_len = std::min(output_w, _i_w + filter_w) - std::max(0, _i_w);
-				int shift_size = (std::max(0, _i_w) - _i_w) * input_c, move_size = filter_w * input_c;
+				int copy_len = w_len * copy_size;
 
 				for(int i_h2 = 0, i_h2_ = std::min(filter_h, output_h - _i_h); i_h2 < i_h2_; i_h2++,  ptr_input_batch_h_w_h2 += batch_h_size,
 															ptr_img += move_size)
 				{
 					if(i_h2 + _i_h < 0) continue;
-					memcpy(ptr_img + shift_size, ptr_input_batch_h_w_h2 + shift_size, w_len * copy_size);
+					memcpy(ptr_img, ptr_input_batch_h_w_h2, copy_len);
 				}
 			}
 		}
@@ -223,10 +228,10 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 }
 
 extern "C"
-int do_maxpool( float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
-		 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-		 		float* pos,		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
-		 		int up, 		int left, 			int batch_from, int batch_to)
+inline int do_maxpool(  float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
+				 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+				 		float* pos,		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
+				 		int up, 		int left, 			int batch_from, int batch_to)
 {
 	if(batch_from == batch_to) return 0;
 	int input_batch_size = input_h * input_w * input_c;
@@ -293,10 +298,10 @@ int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 }
 
 extern "C"
-int do_maxpool_grad(float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
-			 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
-			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-	 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w, 	int up, 	int left, int batch_from, int batch_to)
+inline int do_maxpool_grad( float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
+					 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
+					 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+			 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w, 	int up, 	int left, int batch_from, int batch_to)
 {
 	if(batch_from == batch_to) return 0;
 	int grad_batch_size = grad_h * grad_w * grad_c;
@@ -363,7 +368,7 @@ int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos
 }
 
 extern "C"
-int do_sgn_zero_or_posi(float *input, float *grad, float *output, int len)
+inline int do_sgn_zero_or_posi(float *input, float *grad, float *output, int len)
 {
 	for(int i = 0; i < len; i++, grad++) *output++ = *input++ > 0 ? *grad : 0;
 	return 0;
@@ -386,7 +391,7 @@ int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
 }
 
 extern "C"
-int do_relu(float *input, float *output, int len)
+inline int do_relu(float *input, float *output, int len)
 {
 	for(int i = 0; i < len; i++, ++input) *output++ = *input > 0 ? *input : 0;
 	return 0;
