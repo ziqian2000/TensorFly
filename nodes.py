@@ -704,8 +704,8 @@ class Conv2dGrad2Op(Op):
 		input = input.astype(np.float32)
 		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
-		c_core.conv2d_grad(get_pointer(input), 		input.shape[0], 		input.shape[1], 		input.shape[2], 		input.shape[3], 
-						  get_pointer(output_grad), output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3], 
+		c_core.conv2d_grad(get_pointer(input), 		input.shape[0], 		input.shape[1], 		input.shape[2],
+						  get_pointer(output_grad), output_grad.shape[1], 	output_grad.shape[2],
 						  get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
 						  (n_h - input.shape[1]) // 2, 						(n_w - input.shape[2]) // 2)
 

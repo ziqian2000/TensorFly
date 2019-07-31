@@ -167,16 +167,17 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 }
 
 extern "C"
-int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
-				float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
+int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
+				float* grad,	int grad_h,			int grad_w,	
 				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c,
 				int up,			int left)
 {
-	int batch_size = input_h * input_w * input_c;
-	int batch_h_size = input_w * input_c;
-	int batch_h_w_size = input_c;
-	int grad_batch_size = grad_h * grad_w * grad_c;
-	int grad_batch_h_size = grad_w * grad_c;
+
+	int batch_size = input_h * input_w * output_c;
+	int batch_h_size = input_w * output_c;
+	int batch_h_w_size = output_c;
+	int grad_batch_size = grad_h * grad_w * output_o_c;
+	int grad_batch_h_size = grad_w * output_o_c;
 	int output_h_size = output_w * output_c * output_o_c;
 	int output_h_w_size = output_c * output_o_c;
 
@@ -205,22 +206,22 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 			for(int _i_w = -left, _i_w_ = output_w - left; _i_w < _i_w_; _i_w ++)
 			{
 				int i_w = _i_w + left;
-				float *ptr_input_batch_h_w_h2 = ptr_input_batch + (_i_h * input_w + _i_w) * input_c;
-				float *ptr_img_begin_pos = ptr_img + (i_h * output_w + i_w) * input_c * dim2;
+				float *ptr_input_batch_h_w_h2 = ptr_input_batch + (_i_h * input_w + _i_w) * output_c;
+				float *ptr_img_begin_pos = ptr_img + (i_h * output_w + i_w) * output_c * dim2;
 				for(int i_h2 = std::max(0, -_i_h), i_h2_ = std::min(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
 				{
 					float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + std::max(0, -_i_w);
-					float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + i_h2 * input_w * input_c + std::max(0, -_i_w) * input_c;
+					float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + i_h2 * input_w * output_c + std::max(0, -_i_w) * output_c;
 					for(int i_w2 = std::max(0, -_i_w), i_w2_ = std::min(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
 					{
 						float *tmp = ptr_img_begin_pos2;
-						for(int c = 0; c < input_c; c++)
+						for(int c = 0; c < output_c; c++)
 						{
 							*tmp = ptr_input_batch_h_w_h2_w2[c];
 							tmp += dim2;
 						}
 						++ptr_img_begin_pos2;
-						ptr_input_batch_h_w_h2_w2 += input_c;
+						ptr_input_batch_h_w_h2_w2 += output_c;
 					}
 				}
 			}
