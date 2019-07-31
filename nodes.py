@@ -730,9 +730,9 @@ class MaxPoolOp(Op):
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
 		input = input.astype(np.float32)
 		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32) # the tensor used for result
-		c_core.maxpool( get_pointer(input),		input.shape[0],		input.shape[1],		input.shape[2],		input.shape[3],
+		c_core.maxpool( get_pointer(input),		input.shape[1],		input.shape[2],
 						get_pointer(output),	output.shape[0],	output.shape[1],	output.shape[2],	output.shape[3],
-						ksize[1],				ksize[2],			strides[1],			strides[2],
+						strides[1],			strides[2],
 						(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2,			node.id)
 		return output
 
@@ -753,9 +753,9 @@ class MaxPoolGradOp(Op):
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
 		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(input, dtype = np.float32)
-		c_core.maxpool_grad(	get_pointer(output_grad), 	output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3],
+		c_core.maxpool_grad(	get_pointer(output_grad), 	output_grad.shape[1], 	output_grad.shape[2],
 								get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
-								ksize[1],					ksize[2],				strides[1],				strides[2],
+								strides[1],					strides[2],
 								(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2,	id)
 		return output
 
@@ -863,9 +863,8 @@ def Conv2dFunc(input, filter, strides, padding, need_to_rotate = False):
 		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
 	else:
 		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result (2)
-	c_core.conv2d(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2], 	input.shape[3], 
+	c_core.conv2d(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2],
 					get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
-					get_pointer(output),	output.shape[0], 	output.shape[1],	output.shape[2],	output.shape[3],
-					strides[1], 			strides[2], 		(n_h - input.shape[1]) // 2, 			(n_w - input.shape[2]) // 2,
-					(n_h - input.shape[1] + 1) // 2,			(n_w - input.shape[2] + 1) // 2,		int(need_to_rotate))
+					get_pointer(output),	output.shape[1],	output.shape[2],
+					(n_h - input.shape[1]) // 2, 			(n_w - input.shape[2]) // 2,	int(need_to_rotate))
 	return output
