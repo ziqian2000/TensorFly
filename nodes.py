@@ -3,6 +3,8 @@ from tensorfly.connection import *
 from tensorfly.executor import *
 from tensorfly.helper import *
 
+timer = 0
+
 class Node(object):
 	"""Node in a computation graph."""
 	def __init__(self):
@@ -718,6 +720,7 @@ class MaxPoolOp(Op):
 		new_node = Op.__call__(self)
 		new_node.inputs = [value]
 		new_node.const_attr = (ksize, strides, padding)
+		new_node.id = ++timer
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -727,36 +730,33 @@ class MaxPoolOp(Op):
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
 		input = input.astype(np.float32)
 		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32) # the tensor used for result
-		node.pos = np.zeros_like(output, dtype = np.float32)
 		c_core.maxpool( get_pointer(input),		input.shape[0],		input.shape[1],		input.shape[2],		input.shape[3],
 						get_pointer(output),	output.shape[0],	output.shape[1],	output.shape[2],	output.shape[3],
-						get_pointer(node.pos),	ksize[1],			ksize[2],			strides[1],			strides[2],
-						(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2)
+						ksize[1],				ksize[2],			strides[1],			strides[2],
+						(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2,			node.id)
 		return output
 
 	def gradient(self, node, output_grad):
-		return [max_pool_grad_op(node.inputs[0], node.const_attr[0], node.const_attr[1], output_grad, node)]
+		return [max_pool_grad_op(node.inputs[0], node.const_attr[0], node.const_attr[1], output_grad, node.id)]
 
 class MaxPoolGradOp(Op):
-	def __call__(self, input, ksize, strides, output_grad, ori_node):
+	def __call__(self, input, ksize, strides, output_grad, id):
 		new_node = Op.__call__(self)
 		new_node.inputs = [input, output_grad]
-		new_node.const_attr = (ksize, strides, ori_node)
+		new_node.const_attr = (ksize, strides, id)
 		return new_node
 
 	def compute(self, node, input_vals):
 		input, output_grad = input_vals
-		ksize, strides, ori_node = node.const_attr
+		ksize, strides, id = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
 		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(input, dtype = np.float32)
-		pos = ori_node.pos
-		c_core.maxpool_grad(	get_pointer(pos), 			pos.shape[0], 			pos.shape[1], 			pos.shape[2], 			pos.shape[3], 
-								get_pointer(output_grad), 	output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3],
+		c_core.maxpool_grad(	get_pointer(output_grad), 	output_grad.shape[0], 	output_grad.shape[1], 	output_grad.shape[2], 	output_grad.shape[3],
 								get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
 								ksize[1],					ksize[2],				strides[1],				strides[2],
-								(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2)
+								(n_h - input.shape[1]) // 2, 				(n_w - input.shape[2]) // 2,	id)
 		return output
 
 

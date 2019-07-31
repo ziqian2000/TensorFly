@@ -10,6 +10,9 @@ const int THREAD_NUM = 4;
 float *mem = nullptr;
 int mem_len;
 
+float pos_buffer[5][1000000]; // big enough
+int pos_timer = -1;
+
 extern "C"
 inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta = 0.0)
 {
@@ -228,9 +231,10 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 }
 
 extern "C"
-inline int do_maxpool(  float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
+inline int do_maxpool(  float* pos,
+						float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 				 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-				 		float* pos,		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
+				 		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
 				 		int up, 		int left, 			int batch_from, int batch_to)
 {
 	if(batch_from == batch_to) return 0;
@@ -278,19 +282,20 @@ inline int do_maxpool(  float* input,	int input_batch,	int input_h,	int input_w,
 extern "C"
 int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 	 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-	 		float* pos,		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
-	 		int up, 		int left)
+	 		int ksize_h,	int ksize_w,		int stride_h, 	int stride_w,
+	 		int up, 		int left,			int id)
 {
+	float *pos = pos_buffer[id];
 	int work_num[THREAD_NUM + 1];
 	work_num[0] = 0;
 	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = input_batch / THREAD_NUM;
 	for(int i = 1; i <= input_batch % THREAD_NUM; i++) work_num[i]++;
 	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
 	std::thread *th[THREAD_NUM];
-	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool, 
+	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool, 			pos,
 																input,	input_batch,	input_h,	input_w,	input_c,
 														 		output,	output_batch,	output_h,	output_w,	output_c,
-														 		pos,	ksize_h,	 	ksize_w,	stride_h, 	stride_w,
+														 		ksize_h,	 	ksize_w,	stride_h, 	stride_w,
 														 		up, 	left, 			work_num[i], 		work_num[i+1]);
 	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
 	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
@@ -298,8 +303,8 @@ int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 }
 
 extern "C"
-inline int do_maxpool_grad( float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
-					 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
+inline int do_maxpool_grad( float *pos, 	
+							float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
 					 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
 			 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w, 	int up, 	int left, int batch_from, int batch_to)
 {
@@ -345,19 +350,19 @@ inline int do_maxpool_grad( float* pos,		int pos_batch,		int pos_h,		int pos_w,	
 }
 
 extern "C"
-int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
-			 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
+int maxpool_grad(   float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
 			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-	 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w, 	int up, 		int left)
+	 				int ksize_h,	int ksize_w,		int stride_h, 	int stride_w, 	int up, 		int left,
+	 				int id)
 {
+	float *pos = pos_buffer[id];
 	int work_num[THREAD_NUM + 1];
 	work_num[0] = 0;
 	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = output_batch / THREAD_NUM;
 	for(int i = 1; i <= output_batch % THREAD_NUM; i++) work_num[i]++;
 	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
 	std::thread *th[THREAD_NUM];
-	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool_grad, 
-																pos,		pos_batch,		pos_h,		pos_w,		pos_c,
+	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool_grad, 			pos,
 														 		grad,		grad_batch,		grad_h,		grad_w,		grad_c,
 														 		output,		output_batch,	output_h,	output_w,	output_c,
 												 				ksize_h,	ksize_w,		stride_h, 	stride_w, 	up, 		left,
