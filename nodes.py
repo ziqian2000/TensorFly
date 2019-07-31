@@ -600,16 +600,20 @@ class ReluOp(Op):
 		return np.maximum(input_vals[0], 0)
 
 	def gradient(self, node, output_grad):
-		return [output_grad * relu_gradient(node.inputs[0])]
+		return [relu_gradient(node.inputs[0], output_grad)]
 
 class ReluGradientOp():
-	def __call__(self, tensor):
+	def __call__(self, tensor, grad):
 		new_node = Op.__call__(self)
-		new_node.inputs = [tensor]
+		new_node.inputs = [tensor, grad]
 		return new_node
 
 	def compute(self, node, input_vals):
-		return (np.sign(input_vals[0]) + 1) * 0.5
+		input = input_vals[0].astype(np.float32)
+		grad = input_vals[1].astype(np.float32)
+		output = np.ndarray(shape = input.shape, dtype = np.float32)
+		assert c_core.sgn_zero_or_posi(get_pointer(input), get_pointer(grad), get_pointer(output), input.size) == 0
+		return output
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError

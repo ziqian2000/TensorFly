@@ -336,3 +336,25 @@ int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos
 	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
 	return 0;
 }
+
+extern "C"
+int do_sgn_zero_or_posi(float *input, float *grad, float *output, int len)
+{
+	for(int i = 0; i < len; i++, grad++) *output++ = *input++ > 0 ? *grad : 0;
+	return 0;
+}
+
+extern "C"
+int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
+{
+	int work_num[THREAD_NUM + 1];
+	work_num[0] = 0;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = len / THREAD_NUM;
+	for(int i = 1; i <= len % THREAD_NUM; i++) work_num[i]++;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
+	std::thread *th[THREAD_NUM];
+	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_sgn_zero_or_posi, 
+													input + work_num[i], grad + work_num[i], output + work_num[i], work_num[i+1] - work_num[i]);
+	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
+	return 0;
+}
