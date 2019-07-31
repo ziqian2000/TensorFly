@@ -597,7 +597,10 @@ class ReluOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		return np.maximum(input_vals[0], 0)
+		input = input_vals[0].astype(np.float32)
+		output = np.ndarray(shape = input.shape, dtype = np.float32)
+		assert c_core.relu(get_pointer(input), get_pointer(output), input.size) == 0
+		return output
 
 	def gradient(self, node, output_grad):
 		return [relu_gradient(node.inputs[0], output_grad)]

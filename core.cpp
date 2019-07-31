@@ -265,6 +265,7 @@ int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 														 		pos,	ksize_h,	 	ksize_w,	stride_h, 	stride_w,
 														 		up, 	left, 			work_num[i], 		work_num[i+1]);
 	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
+	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
 	return 0;
 }
 
@@ -334,6 +335,7 @@ int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos
 												 				ksize_h,	ksize_w,		stride_h, 	stride_w, 	up, 		left,
 												 				work_num[i], 		work_num[i+1]);
 	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
+	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
 	return 0;
 }
 
@@ -356,5 +358,29 @@ int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
 	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_sgn_zero_or_posi, 
 													input + work_num[i], grad + work_num[i], output + work_num[i], work_num[i+1] - work_num[i]);
 	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
+	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
+	return 0;
+}
+
+extern "C"
+int do_relu(float *input, float *output, int len)
+{
+	for(int i = 0; i < len; i++, ++input) *output++ = *input > 0 ? *input : 0;
+	return 0;
+}
+
+extern "C"
+int relu(float *input, float *output, int len)
+{
+	int work_num[THREAD_NUM + 1];
+	work_num[0] = 0;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = len / THREAD_NUM;
+	for(int i = 1; i <= len % THREAD_NUM; i++) work_num[i]++;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
+	std::thread *th[THREAD_NUM];
+	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_relu, 
+													input + work_num[i], output + work_num[i], work_num[i+1] - work_num[i]);
+	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
+	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
 	return 0;
 }
