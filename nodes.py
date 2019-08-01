@@ -244,7 +244,8 @@ class MatMulOp(Op):
 		else:
 			if node.matmul_attr_trans_B:	c = np.ndarray(shape = (na, nb), dtype = np.float32)
 			else:							c = np.ndarray(shape = (na, mb), dtype = np.float32)
-		c_core.matmul_trans(get_pointer(a), get_pointer(b), get_pointer(c), na, ma, nb, mb, node.matmul_attr_trans_A, node.matmul_attr_trans_B)
+		c_core.matmul_trans(get_pointer(a), get_pointer(b), get_pointer(c), na, ma, nb, mb, 
+						int(node.matmul_attr_trans_A), int(node.matmul_attr_trans_B))
 		return c
 
 	def gradient(self, node, output_grad):
@@ -438,10 +439,6 @@ class AdaptiveBroadcastToOp(Op):
 		if axis is None:
 			return np.ones(input_vals[1].shape) * val
 		else:
-			# ex_val = np.expand_dims(val, axis = axis)
-			# for i in range(np.shape(input_vals[1])[axis] - 1):
-			# 	ex_val = np.insert(ex_val, 0, val, axis = axis)
-			# return ex_val
 			return np.broadcast_to(np.expand_dims(val, axis = axis), input_vals[1].shape)
 
 	def gradient(self, node, output_grad):

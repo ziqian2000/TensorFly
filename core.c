@@ -1,20 +1,21 @@
-#include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <thread>
-#include <cassert>
 #include <cblas.h>
+#include <stdlib.h>
+#include <string.h>
 
-const int THREAD_NUM = 4;
-
-float *mem = nullptr;
+float *mem = NULL;
 int mem_len;
 
 float pos_buffer[5][1000000]; // big enough
 int pos_timer = -1;
 
-extern "C"
-inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta = 0.0)
+
+inline float swap_f(float *a, float *b){float c = *a; *a = *b; *b = c;}
+inline int swap_i(int *a, int *b){int c = *a; *a = *b; *b = c;}
+
+inline int min(int a, int b){return a < b ? a : b;}
+inline int max(int a, int b){return a > b ? a : b;}
+
+inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta)
 {
 	/*
 		 cblas_sgemm(order,transA,transB,M,N,K,ALPHA,A,LDA,B,LDB,BETA,C,LDC);
@@ -33,8 +34,8 @@ inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, fl
     return 0;
 }
 
-extern "C"
-void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, bool transA, bool transB)
+
+void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, int transA, int transB)
 {
     if(transA)
         transB
@@ -46,12 +47,12 @@ void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, 
             : cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, na, mb, ma, 1.0, a, ma, b, mb, 0.0, c, mb);
 }
 
-inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &filter_c, int &filter_o_c)
+inline float* swap_dim2_and_dim3(float *filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
 	if(mem_len < filter_h * filter_w * filter_c * filter_o_c)
 	{
-		delete[] mem;
-		mem = new float[mem_len = filter_h * filter_w * filter_c * filter_o_c];
+		free(mem);
+		mem = (float*)malloc((mem_len = filter_h * filter_w * filter_c * filter_o_c) * sizeof(float));
 	}
 	float *tmp = mem;
 	for(int h = 0; h < filter_h; h++)
@@ -65,17 +66,10 @@ inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &
 					tmp_h_w[oc * filter_c + c] = *filter_h_w++;
 		}
 	}
-	std::swap(filter_c, filter_o_c);
-	/* 
-		Attention! 
-		Do not delete 'filter' here as the 'filter' is only a pointer copied from py.
-		You'll get an RE if you delete it because numpy will delete it again.
-	*/
-	// delete[] filter; 
-	filter = tmp;
+	return tmp;
 }
 
-inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
+inline void rotate_180(float *filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
 	int h_size = filter_w * filter_c * filter_o_c;
 	int w_size = filter_c * filter_o_c;
@@ -85,7 +79,7 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 			float *filter_tmp1 = filter + h * h_size + w * w_size;
 			float *filter_tmp2 = filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size;
 			for(int c = 0; c < w_size; c++)
-				std::swap(*filter_tmp1++, *filter_tmp2++);
+				swap_f(filter_tmp1++, filter_tmp2++);
 		}
 	if(filter_h % 2)
 	{
@@ -95,14 +89,14 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 			float *filter_tmp1 = filter + h * h_size + w * w_size;
 			float *filter_tmp2 = filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size;
 			for(int c = 0; c < w_size; c++)
-				std::swap(*filter_tmp1++, *filter_tmp2++);
+				swap_f(&*filter_tmp1++, &*filter_tmp2++);
 		}
 	}
 }
 
-extern "C"
 
-extern "C"
+
+
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_h,		int output_w,
@@ -110,7 +104,8 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 {
 	if(need_to_rotate) // for gradient calculation
 	{
-		swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
+		filter = swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
+		swap_i(&filter_c, &filter_o_c);
 		rotate_180(			filter, filter_h, filter_w, filter_c, filter_o_c);
 	}
 
@@ -130,8 +125,8 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 
 	if(mem_len < dim1 * dim2)
 	{
-		delete[] mem;
-		mem = new float[mem_len = dim1 * dim2];
+		free(mem);
+		mem = (float*)malloc((mem_len = dim1 * dim2) * sizeof(float));
 	}
 
 	float *img = mem; // temporary vector for calculation
@@ -146,14 +141,14 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 			for(int _i_w = -left; _i_w < input_w - left; _i_w ++)
 			{
 				int i_h = _i_h + up, i_w = _i_w + left;
-				int shift_size = (std::max(0, _i_w) - _i_w) * filter_c, move_size = filter_w * filter_c;
+				int shift_size = (max(0, _i_w) - _i_w) * filter_c, move_size = filter_w * filter_c;
 				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * filter_c + shift_size;
 				float *ptr_img = img + (i_h * output_w + i_w) * filter_h * filter_w * filter_c + shift_size;
 
-				int w_len = std::min(output_w, _i_w + filter_w) - std::max(0, _i_w);
+				int w_len = min(output_w, _i_w + filter_w) - max(0, _i_w);
 				int copy_len = w_len * copy_size;
 
-				for(int i_h2 = 0, i_h2_ = std::min(filter_h, output_h - _i_h); i_h2 < i_h2_; i_h2++,  ptr_input_batch_h_w_h2 += batch_h_size,
+				for(int i_h2 = 0, i_h2_ = min(filter_h, output_h - _i_h); i_h2 < i_h2_; i_h2++,  ptr_input_batch_h_w_h2 += batch_h_size,
 															ptr_img += move_size)
 				{
 					if(i_h2 + _i_h < 0) continue;
@@ -161,12 +156,12 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 				}
 			}
 		}
-		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3);
+		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3, 0.0);
 	}
 	return 0;
 }
 
-extern "C"
+
 int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 				float* grad,	int grad_h,			int grad_w,	
 				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c,
@@ -190,8 +185,8 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 
 	if(mem_len < dim1 * dim2)
 	{
-		delete[] mem;
-		mem = new float[mem_len = dim1 * dim2];
+		free(mem);
+		mem = (float*)malloc((mem_len = dim1 * dim2) * sizeof(float));
 	}
 
 	float *img = mem; // temporary vector for calculation
@@ -208,11 +203,11 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 				int i_w = _i_w + left;
 				float *ptr_input_batch_h_w_h2 = ptr_input_batch + (_i_h * input_w + _i_w) * output_c;
 				float *ptr_img_begin_pos = ptr_img + (i_h * output_w + i_w) * output_c * dim2;
-				for(int i_h2 = std::max(0, -_i_h), i_h2_ = std::min(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
+				for(int i_h2 = max(0, -_i_h), i_h2_ = min(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
 				{
-					float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + std::max(0, -_i_w);
-					float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + i_h2 * input_w * output_c + std::max(0, -_i_w) * output_c;
-					for(int i_w2 = std::max(0, -_i_w), i_w2_ = std::min(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
+					float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + max(0, -_i_w);
+					float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + i_h2 * input_w * output_c + max(0, -_i_w) * output_c;
+					for(int i_w2 = max(0, -_i_w), i_w2_ = min(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
 					{
 						float *tmp = ptr_img_begin_pos2;
 						for(int c = 0; c < output_c; c++)
@@ -231,21 +226,20 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 	return 0;
 }
 
-extern "C"
-inline int do_maxpool(  float* pos,
-						float* input,	int input_h,		int input_w,
-				 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-				 		int stride_h, 	int stride_w,
-				 		int up, 		int left, 			int batch_from, int batch_to)
+
+int maxpool( float* pos,
+					float* input,	int input_h,		int input_w,
+			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+			 		int stride_h, 	int stride_w,
+			 		int up, 		int left)
 {
-	if(batch_from == batch_to) return 0;
 	int input_batch_size = input_h * input_w * output_c;
 	int input_batch_h_size = input_w * output_c;
 	int output_batch_size = output_h * output_w * output_c;
 	int output_batch_h_size = output_w * output_c;
-	int idx = batch_from * input_h * input_w;
-	memset(output + batch_from * output_batch_size, 254, sizeof(float) * (batch_to - batch_from) * output_batch_size);
-	for(int batch = batch_from; batch < batch_to; batch++)
+	int idx = 0;
+	memset(output, 254, sizeof(float) * output_batch * output_batch_size);
+	for(int batch = 0; batch < output_batch; batch++)
 	{
 		float *ptr_input_batch = input + batch * input_batch_size;
 		float *ptr_output_batch = output + batch * output_batch_size;
@@ -280,46 +274,18 @@ inline int do_maxpool(  float* pos,
 	return 0;
 }
 
-extern "C"
-int maxpool(float* input,	int input_h,		int input_w,
-	 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-	 		int stride_h, 	int stride_w,
-	 		int up, 		int left,			int id)
+int maxpool_grad(float *pos, 	
+						float* grad,	int grad_h,			int grad_w,
+				 		float* output,	int output_batch,	int output_h,		int output_w,	int output_c,
+		 				int stride_h, 	int stride_w, 		int up, 			int left)
 {
-
-	// printf("->\n%d %d %d %d\n%d %d %d %d\n",input_batch,input_h,input_w,input_c,output_batch,output_h,output_w,output_c);
-
-	float *pos = pos_buffer[id];
-	int work_num[THREAD_NUM + 1];
-	work_num[0] = 0;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = output_batch / THREAD_NUM;
-	for(int i = 1; i <= output_batch % THREAD_NUM; i++) work_num[i]++;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
-	std::thread *th[THREAD_NUM];
-	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool, 			pos,
-																input,	input_h,		input_w,
-														 		output,	output_batch,	output_h,	output_w,	output_c,
-														 		stride_h, 				stride_w,
-														 		up, 	left, 			work_num[i], 		work_num[i+1]);
-	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
-	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
-	return 0;
-}
-
-extern "C"
-inline int do_maxpool_grad( float *pos, 	
-							float* grad,	int grad_h,			int grad_w,
-					 		float* output,	int output_batch,	int output_h,		int output_w,	int output_c,
-			 				int stride_h, 	int stride_w, 		int up, 			int left, 		int batch_from,	 int batch_to)
-{
-	if(batch_from == batch_to) return 0;
 	int grad_batch_size = grad_h * grad_w * output_c;
 	int grad_batch_h_size = grad_w * output_c;
 	int output_batch_size = output_h * output_w * output_c;
 	int output_batch_h_size = output_w * output_c;
-	int idx = batch_from * output_h * output_w;
+	int idx = 0;
 
-	for(int batch = batch_from; batch < batch_to; batch++)
+	for(int batch = 0; batch < output_batch; batch++)
 	{
 		float *ptr_grad_batch = grad + batch * grad_batch_size;
 		float *ptr_pos_batch = pos + batch * grad_batch_size;
@@ -353,71 +319,14 @@ inline int do_maxpool_grad( float *pos,
 	return 0;
 }
 
-extern "C"
-int maxpool_grad(   float* grad,	int grad_h,			int grad_w,	
-			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-	 				int stride_h, 	int stride_w, 		int up, 		int left,
-	 				int id)
-{
-	float *pos = pos_buffer[id];
-	int work_num[THREAD_NUM + 1];
-	work_num[0] = 0;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = output_batch / THREAD_NUM;
-	for(int i = 1; i <= output_batch % THREAD_NUM; i++) work_num[i]++;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
-	std::thread *th[THREAD_NUM];
-	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool_grad, 			pos,
-														 		grad,		grad_h,			grad_w,	
-														 		output,		output_batch,	output_h,	output_w,	output_c,
-												 				stride_h, 	stride_w, 		up, 		left,
-												 				work_num[i], 		work_num[i+1]);
-	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
-	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
-	return 0;
-}
-
-extern "C"
-inline int do_sgn_zero_or_posi(float *input, float *grad, float *output, int len)
+int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
 {
 	for(int i = 0; i < len; i++, grad++) *output++ = *input++ > 0 ? *grad : 0;
 	return 0;
 }
 
-extern "C"
-int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
-{
-	int work_num[THREAD_NUM + 1];
-	work_num[0] = 0;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = len / THREAD_NUM;
-	for(int i = 1; i <= len % THREAD_NUM; i++) work_num[i]++;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
-	std::thread *th[THREAD_NUM];
-	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_sgn_zero_or_posi, 
-													input + work_num[i], grad + work_num[i], output + work_num[i], work_num[i+1] - work_num[i]);
-	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
-	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
-	return 0;
-}
-
-extern "C"
-inline int do_relu(float *input, float *output, int len)
-{
-	for(int i = 0; i < len; i++, ++input) *output++ = *input > 0 ? *input : 0;
-	return 0;
-}
-
-extern "C"
 int relu(float *input, float *output, int len)
 {
-	int work_num[THREAD_NUM + 1];
-	work_num[0] = 0;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = len / THREAD_NUM;
-	for(int i = 1; i <= len % THREAD_NUM; i++) work_num[i]++;
-	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
-	std::thread *th[THREAD_NUM];
-	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_relu, 
-													input + work_num[i], output + work_num[i], work_num[i+1] - work_num[i]);
-	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
-	for(int i = 0; i < THREAD_NUM; i++) delete th[i];
+	for(int i = 0; i < len; i++, ++input) *output++ = *input > 0 ? *input : 0;
 	return 0;
 }
