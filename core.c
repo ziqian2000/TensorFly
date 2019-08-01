@@ -6,7 +6,6 @@ float *mem = NULL;
 int mem_len;
 
 float pos_buffer[5][1000000]; // big enough
-int pos_timer = -1;
 
 
 inline float swap_f(float *a, float *b){float c = *a; *a = *b; *b = c;}
@@ -89,7 +88,7 @@ inline void rotate_180(float *filter, int filter_h, int filter_w, int filter_c, 
 			float *filter_tmp1 = filter + h * h_size + w * w_size;
 			float *filter_tmp2 = filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size;
 			for(int c = 0; c < w_size; c++)
-				swap_f(&*filter_tmp1++, &*filter_tmp2++);
+				swap_f(filter_tmp1++, filter_tmp2++);
 		}
 	}
 }
@@ -227,11 +226,10 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 }
 
 
-int maxpool( float* pos,
-					float* input,	int input_h,		int input_w,
-			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
-			 		int stride_h, 	int stride_w,
-			 		int up, 		int left)
+int maxpool( 	float* input,	int input_h,		int input_w,
+		 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+		 		int stride_h, 	int stride_w,
+		 		int up, 		int left,			int id)
 {
 	int input_batch_size = input_h * input_w * output_c;
 	int input_batch_h_size = input_w * output_c;
@@ -239,6 +237,7 @@ int maxpool( float* pos,
 	int output_batch_h_size = output_w * output_c;
 	int idx = 0;
 	memset(output, 254, sizeof(float) * output_batch * output_batch_size);
+	float *pos = pos_buffer[id];
 	for(int batch = 0; batch < output_batch; batch++)
 	{
 		float *ptr_input_batch = input + batch * input_batch_size;
@@ -274,16 +273,16 @@ int maxpool( float* pos,
 	return 0;
 }
 
-int maxpool_grad(float *pos, 	
-						float* grad,	int grad_h,			int grad_w,
-				 		float* output,	int output_batch,	int output_h,		int output_w,	int output_c,
-		 				int stride_h, 	int stride_w, 		int up, 			int left)
+int maxpool_grad(	float* grad,	int grad_h,			int grad_w,
+			 		float* output,	int output_batch,	int output_h,		int output_w,	int output_c,
+	 				int stride_h, 	int stride_w, 		int up, 			int left, 		int id)
 {
 	int grad_batch_size = grad_h * grad_w * output_c;
 	int grad_batch_h_size = grad_w * output_c;
 	int output_batch_size = output_h * output_w * output_c;
 	int output_batch_h_size = output_w * output_c;
 	int idx = 0;
+	float *pos = pos_buffer[id];
 
 	for(int batch = 0; batch < output_batch; batch++)
 	{
@@ -322,11 +321,5 @@ int maxpool_grad(float *pos,
 int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
 {
 	for(int i = 0; i < len; i++, grad++) *output++ = *input++ > 0 ? *grad : 0;
-	return 0;
-}
-
-int relu(float *input, float *output, int len)
-{
-	for(int i = 0; i < len; i++, ++input) *output++ = *input > 0 ? *input : 0;
 	return 0;
 }
