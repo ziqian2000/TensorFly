@@ -245,7 +245,7 @@ class MatMulOp(Op):
 		else:
 			if node.matmul_attr_trans_B:	c = np.ndarray(shape = (na, nb), dtype = np.float32)
 			else:							c = np.ndarray(shape = (na, mb), dtype = np.float32)
-		c_core.matmul_trans(get_pointer(a), get_pointer(b), get_pointer(c), na, ma, nb, mb, node.matmul_attr_trans_A, node.matmul_attr_trans_B)
+		c_core.matmul_trans(get_pointer(a), get_pointer(b), get_pointer(c), na, ma, nb, mb, int(node.matmul_attr_trans_A), int(node.matmul_attr_trans_B))
 		return c
 
 	def gradient(self, node, output_grad):

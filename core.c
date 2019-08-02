@@ -1,10 +1,13 @@
-#include <cstdio>
-#include <cstring> 
-#include <iostream>
 #include <cblas.h>
+#include <stdlib.h>
+#include <string.h>
 
-extern "C"
-inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta = 0.0)
+inline int max_i(int a, int b){return a > b ? a : b;}
+inline int min_i(int a, int b){return a < b ? a : b;}
+inline void swap_f(float *a, float *b){float c = *a; *a = *b; *b = c;}
+inline int swap_i(int *a, int *b){int c = *a; *a = *b; *b = c;}
+
+inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, float beta)
 {
 	/*
 		 cblas_sgemm(order,transA,transB,M,N,K,ALPHA,A,LDA,B,LDB,BETA,C,LDC);
@@ -23,8 +26,8 @@ inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, fl
     return 0;
 }
 
-extern "C"
-void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, bool transA, bool transB)
+
+void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, int transA, int transB)
 {
     if(transA)
         transB
@@ -36,9 +39,9 @@ void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, 
             : cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, na, mb, ma, 1.0, a, ma, b, mb, 0.0, c, mb);
 }
 
-inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &filter_c, int &filter_o_c)
+inline float* swap_dim2_and_dim3(float *filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
-	float *tmp = new float[filter_h * filter_w * filter_c * filter_o_c];
+	float *tmp = (float*)malloc(filter_h * filter_w * filter_c * filter_o_c * sizeof(float));
 	for(int h = 0; h < filter_h; h++)
 	{
 		for(int w = 0; w < filter_w; w++)
@@ -50,17 +53,10 @@ inline void swap_dim2_and_dim3(float *&filter, int filter_h, int filter_w, int &
 					tmp_h_w[oc * filter_c + c] = filter_h_w[c * filter_o_c + oc];
 		}
 	}
-	std::swap(filter_c, filter_o_c);
-	/* 
-		Attention! 
-		Do not delete 'filter' here as the 'filter' is only a pointer copied from py.
-		You'll get an RE if you delete it because numpy will delete it again.
-	*/
-	// delete[] filter; 
-	filter = tmp;
+	return tmp;
 }
 
-inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
+inline void rotate_180(float *filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
 	int h_size = filter_w * filter_c * filter_o_c;
 	int w_size = filter_c * filter_o_c;
@@ -68,7 +64,8 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 		for(int w = 0; w < filter_w; w++)
 		{
 			for(int c = 0; c < w_size; c++)
-				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+				// std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+				swap_f((filter + h * h_size + w * w_size + c), (filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
 		}
 	if(filter_h % 2)
 	{
@@ -76,12 +73,13 @@ inline void rotate_180(float *&filter, int filter_h, int filter_w, int filter_c,
 		for(int w = 0; w < filter_w / 2; w++)
 		{
 			for(int c = 0; c < w_size; c++)
-				std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+				// std::swap(*(filter + h * h_size + w * w_size + c), *(filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
+				swap_f((filter + h * h_size + w * w_size + c), (filter + (filter_h - 1 - h) * h_size + (filter_w - 1 - w) * w_size + c));
 		}
 	}
 }
 
-extern "C"
+
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
@@ -89,7 +87,8 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 {
 	if(need_to_rotate) // for gradient calculation
 	{
-		swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
+		filter = swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
+		int t = filter_c; filter_c = filter_o_c; filter_o_c = t;
 		rotate_180(			filter, filter_h, filter_w, filter_c, filter_o_c);
 	}
 
@@ -109,7 +108,7 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 	float *ptr_input_batch = input;
 	float *ptr_output_batch = output;
 
-	float *img = new float[dim1 * dim2]; // temporary vector for calculation
+	float *img = (float*)malloc(dim1 * dim2 * sizeof(float));
 	memset(img, 0, sizeof(float) * dim1 * dim2); // 优化！！！！！！！！！！！！！！！
 
 	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_output_batch += output_batch_size) // for each patch
@@ -123,10 +122,10 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * input_c;
 				float *ptr_img = img + (i_h * output_w + i_w) * filter_h * filter_w * filter_c;
 
-				int w_len = std::min(output_w, _i_w + filter_w) - std::max(0, _i_w);
-				int shift_size = (std::max(0, _i_w) - _i_w) * input_c, move_size = filter_w * input_c;
+				int w_len = min_i(output_w, _i_w + filter_w) - max_i(0, _i_w);
+				int shift_size = (max_i(0, _i_w) - _i_w) * input_c, move_size = filter_w * input_c;
 
-				for(int i_h2 = 0, i_h2_ = std::min(filter_h, output_h - _i_h); i_h2 < i_h2_; i_h2++,  ptr_input_batch_h_w_h2 += batch_h_size,
+				for(int i_h2 = 0, i_h2_ = min_i(filter_h, output_h - _i_h); i_h2 < i_h2_; i_h2++,  ptr_input_batch_h_w_h2 += batch_h_size,
 															ptr_img += move_size)
 				{
 					if(i_h2 + _i_h < 0) continue;
@@ -134,13 +133,13 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 				}
 			}
 		}
-		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3);
+		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3, 0);
 	}
-	delete[] img;
+	free(img);
 	return 0;
 }
 
-extern "C"
+
 int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 				float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
 				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c,
@@ -161,7 +160,7 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 	float *ptr_input_batch = input;
 	float *ptr_grad_batch = grad;
 
-	float *img = new float[dim1 * dim2]; // temporary vector for calculation
+	float *img = (float*)malloc(dim1 * dim2 * sizeof(float));
 	memset(img, 0, sizeof(float) * dim1 * dim2);
 
 	for(int batch = 0; batch < input_batch; batch++, ptr_input_batch += batch_size, ptr_grad_batch += grad_batch_size) // for each patch
@@ -175,9 +174,9 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 				int i_w = _i_w + left;
 				float *ptr_input_batch_h_w_h2 = ptr_input_batch + (_i_h * input_w + _i_w) * input_c;
 				float *ptr_img_begin_pos = ptr_img + (i_h * output_w + i_w) * input_c * dim2;
-				for(int i_h2 = std::max(0, -_i_h), i_h2_ = std::min(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
+				for(int i_h2 = max_i(0, -_i_h), i_h2_ = min_i(grad_h, input_h - _i_h); i_h2 < i_h2_; i_h2++)
 				{
-					for(int i_w2 = std::max(0, -_i_w), i_w2_ = std::min(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
+					for(int i_w2 = max_i(0, -_i_w), i_w2_ = min_i(grad_w, input_w - _i_w); i_w2 < i_w2_; i_w2++)
 					{
 						float *ptr_input_batch_h_w_h2_w2 = ptr_input_batch_h_w_h2 + (i_h2 * input_w + i_w2) * input_c;
 						float *ptr_img_begin_pos2 = ptr_img_begin_pos + i_h2 * grad_w + i_w2;
@@ -192,11 +191,11 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,	int inp
 		}
 		matmul(img, ptr_grad_batch, output, dim1, dim2, dim3, batch > 0 ? 1.0 : 0.0);
 	}
-	delete[] img;
+	free(img);
 	return 0;
 }
 
-extern "C"
+
 int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c,
 	 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
 	 		float* pos,		int ksize_h,	 	int ksize_w,	int stride_h, 	int stride_w,
@@ -244,7 +243,7 @@ int maxpool(float* input,	int input_batch,	int input_h,	int input_w,	int input_c
 	return 0;
 }
 
-extern "C"
+
 int maxpool_grad(   float* pos,		int pos_batch,		int pos_h,		int pos_w,		int pos_c,
 			 		float* grad,	int grad_batch,		int grad_h,		int grad_w,		int grad_c,
 			 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
