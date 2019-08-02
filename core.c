@@ -1,5 +1,5 @@
 #include <cstdio>
-#include <cstring>
+#include <cstring> 
 #include <iostream>
 #include <cblas.h>
 
