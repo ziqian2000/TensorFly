@@ -7,7 +7,6 @@ int mem_len;
 
 float pos_buffer[3][62722222]; // big enough
 
-
 inline float swap_f(float *a, float *b){float c = *a; *a = *b; *b = c;}
 inline int swap_i(int *a, int *b){int c = *a; *a = *b; *b = c;}
 

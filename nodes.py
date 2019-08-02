@@ -23,6 +23,7 @@ class Node(object):
 		self.op = None
 		self.const_attr = None
 		self.name = ""
+		self.changeable = True;
 
 	def __add__(self, other):
 		"""Adding two nodes return a new node."""
@@ -230,6 +231,7 @@ class MatMulOp(Op):
 		new_node.matmul_attr_trans_B = trans_B
 		new_node.inputs = [node_A, node_B]
 		new_node.name = "MatMul(%s,%s,%s,%s)" % (node_A.name, node_B.name, str(trans_A), str(trans_B))
+		new_node.changeable = any([x.changeable for x in new_node.inputs])
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -253,8 +255,8 @@ class MatMulOp(Op):
 			
 		Useful formula: if Y=AB, then dA=dY B^T, dB=A^T dY
 		"""
-		return [matmul(output_grad, node.inputs[1], False, not node.matmul_attr_trans_B), 
-				matmul(node.inputs[0], output_grad, not node.matmul_attr_trans_A, False)]
+		return [matmul(output_grad, node.inputs[1], False, not node.matmul_attr_trans_B) if node.inputs[0].changeable else node.inputs[0], 
+				matmul(node.inputs[0], output_grad, not node.matmul_attr_trans_A, False) if node.inputs[1].changeable else node.inputs[1]]
 
 class DivOp(Op):
 	def __call__(self, node_A, node_B):
@@ -315,6 +317,7 @@ class ConstantOp(Op):
 			value = value.astype(dtype)
 		new_node.const_attr = value
 		new_node.name = name
+		new_node.changeable = False
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -330,6 +333,7 @@ class PlaceholderOp(Op):
 		new_node = Op.__call__(self)
 		new_node.const_attr = (dtype, shape)
 		new_node.name = name
+		new_node.changeable = False
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -659,6 +663,7 @@ class Conv2dOp(Op):
 		new_node = Op.__call__(self)
 		new_node.inputs = [input, filter]
 		new_node.const_attr = (strides, padding)
+		new_node.changeable = any([x.changeable for x in new_node.inputs])
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -667,7 +672,8 @@ class Conv2dOp(Op):
 		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = node.const_attr[0], padding = node.const_attr[1], need_to_rotate = False)
 
 	def gradient(self, node, output_grad):
-		return [conv2d_grad_1_op(output_grad, node.inputs[1]), conv2d_grad_2_op(output_grad, node.inputs[0], node.inputs[1])]
+		return [conv2d_grad_1_op(output_grad, node.inputs[1]) 					if node.inputs[0].changeable else node.inputs[0], 
+				conv2d_grad_2_op(output_grad, node.inputs[0], node.inputs[1])   if node.inputs[1].changeable else node.inputs[1]]
 
 class Conv2dGrad1Op(Op):
 	""" assuming strides == [1,1,1,1] and padding == 'SAME' """
@@ -762,13 +768,14 @@ class ReshapeOp(Op):
 		new_node = Op.__call__(self)
 		new_node.inputs = [tensor]
 		new_node.const_attr = shape
+		new_node.changeable = any([x.changeable for x in new_node.inputs])
 		return new_node
 
 	def compute(self, node, input_vals):
 		return np.reshape(input_vals[0], node.const_attr)
 
 	def gradient(self, node, output_grad):
-		return [reshape_to_tensor_op(output_grad, node.inputs[0])]
+		return [reshape_to_tensor_op(output_grad, node.inputs[0]) if node.inputs[0].changeable else node.inputs[0]]
 
 class ReshapeToTensorOp(Op):
 	"""tensor1 -> tensor2"""
