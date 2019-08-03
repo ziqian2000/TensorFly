@@ -1,6 +1,9 @@
 #include <cblas.h>
 #include <stdlib.h>
 #include <string.h>
+#include <thread>
+
+const int THREAD_NUM = 4;
 
 float *mem = NULL;
 int mem_len;
@@ -32,7 +35,7 @@ inline int matmul(float* matA, float* matB, float* matC, int n, int k, int m, fl
     return 0;
 }
 
-
+extern "C"
 void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, int transA, int transB)
 {
     if(transA)
@@ -93,8 +96,7 @@ inline void rotate_180(float *filter, int filter_h, int filter_w, int filter_c, 
 }
 
 
-
-
+extern "C"
 int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
 			float* output,	int output_h,		int output_w,
@@ -160,6 +162,7 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 }
 
 
+extern "C"
 int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 				float* grad,	int grad_h,			int grad_w,	
 				float* output,	int output_h,		int output_w,	int output_c,	int output_o_c,
@@ -245,19 +248,19 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 }
 
 
-int maxpool( 	float* input,	int input_h,		int input_w,
+int do_maxpool( float* input,	int input_h,		int input_w,
 		 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
 		 		int stride_h, 	int stride_w,
-		 		int up, 		int left,			int id)
+		 		int up, 		int left,			int id,			int batch_from, int batch_to)
 {
 	int input_batch_size = input_h * input_w * output_c;
 	int input_batch_h_size = input_w * output_c;
 	int output_batch_size = output_h * output_w * output_c;
 	int output_batch_h_size = output_w * output_c;
-	int idx = 0;
-	memset(output, 254, sizeof(float) * output_batch * output_batch_size);
+	int idx = batch_from * input_h * input_w;
+	memset(output + output_batch_size * batch_from, 254, sizeof(float) * (batch_to - batch_from) * output_batch_size);
 	float *pos = pos_buffer[id];
-	for(int batch = 0; batch < output_batch; ++batch)
+	for(int batch = batch_from; batch < batch_to; ++batch)
 	{
 		float *ptr_input_batch = input + batch * input_batch_size;
 		float *ptr_output_batch = output + batch * output_batch_size;
@@ -305,17 +308,39 @@ int maxpool( 	float* input,	int input_h,		int input_w,
 	return 0;
 }
 
-int maxpool_grad(	float* grad,	int grad_h,			int grad_w,
+extern "C"
+int maxpool( 	float* input,	int input_h,		int input_w,
+		 		float* output,	int output_batch,	int output_h,	int output_w,	int output_c,
+		 		int stride_h, 	int stride_w,
+		 		int up, 		int left,			int id)
+{
+	int work_num[THREAD_NUM + 1];
+	work_num[0] = 0;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = output_batch / THREAD_NUM;
+	for(int i = 1; i <= output_batch % THREAD_NUM; i++) work_num[i]++;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
+	std::thread *th[THREAD_NUM];
+	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool, 
+																input,	input_h,	input_w,
+														 		output,	output_batch,	output_h,	output_w,	output_c,
+														 		stride_h, 	stride_w,
+														 		up, 	left, 		id,		work_num[i], 		work_num[i+1]);
+	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
+	return 0;
+}
+
+int do_maxpool_grad(	float* grad,	int grad_h,			int grad_w,
 			 		float* output,	int output_batch,	int output_h,		int output_w,	int output_c,
-	 				int stride_h, 	int stride_w, 		int up, 			int left, 		int id)
+	 				int stride_h, 	int stride_w, 		int up, 			int left, 		int id,
+	 				int batch_from,	int batch_to)
 {
 	int grad_batch_size = grad_h * grad_w * output_c;
 	int grad_batch_h_size = grad_w * output_c;
 	int output_batch_size = output_h * output_w * output_c;
 	int output_batch_h_size = output_w * output_c;
-	int idx = 0;
+	int idx = batch_from * output_h * output_w;
 	float *pos = pos_buffer[id];
-	for(int batch = 0; batch < output_batch; ++batch)
+	for(int batch = batch_from; batch < batch_to; ++batch)
 	{
 		float *ptr_grad_batch = grad + batch * grad_batch_size;
 		float *ptr_pos_batch = pos + batch * grad_batch_size;
@@ -363,8 +388,22 @@ int maxpool_grad(	float* grad,	int grad_h,			int grad_w,
 	return 0;
 }
 
-int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
+extern "C"
+int maxpool_grad(	float* grad,	int grad_h,			int grad_w,
+			 		float* output,	int output_batch,	int output_h,		int output_w,	int output_c,
+	 				int stride_h, 	int stride_w, 		int up, 			int left, 		int id)
 {
-	for(int i = 0; i < len; ++i, ++grad) *output++ = *input++ > 0 ? *grad : 0;
+	int work_num[THREAD_NUM + 1];
+	work_num[0] = 0;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] = output_batch / THREAD_NUM;
+	for(int i = 1; i <= output_batch % THREAD_NUM; i++) work_num[i]++;
+	for(int i = 1; i <= THREAD_NUM; i++) work_num[i] += work_num[i-1];
+	std::thread *th[THREAD_NUM];
+	for(int i = 0; i < THREAD_NUM; i++) th[i] = new std::thread(do_maxpool_grad, 
+														 		grad,		grad_h,		grad_w,
+														 		output,		output_batch,	output_h,	output_w,	output_c,
+												 				stride_h, 	stride_w, 	up, 		left,		id,
+												 				work_num[i], 		work_num[i+1]);
+	for(int i = 0; i < THREAD_NUM; i++) th[i]->join();
 	return 0;
 }

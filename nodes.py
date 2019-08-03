@@ -606,11 +606,7 @@ class ReluGradientOp():
 		return new_node
 
 	def compute(self, node, input_vals):
-		input = input_vals[0].astype(np.float32)
-		grad = input_vals[1].astype(np.float32)
-		output = np.ndarray(shape = input.shape, dtype = np.float32)
-		c_core.sgn_zero_or_posi(get_pointer(input), get_pointer(grad), get_pointer(output), input.size)
-		return output
+		return (np.sign(input_vals[0]) + 1) * 0.5 * input_vals[1]
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
