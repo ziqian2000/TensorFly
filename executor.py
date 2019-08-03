@@ -38,6 +38,8 @@ class Executor:
 				# _t = time.time()
 				# print(type(node.op))
 				node_to_val_map[node] = node.op.compute(node, [node_to_val_map[p] for p in node.inputs])
+				# print(node.op)
+				# print(np.max(node_to_val_map[node]), np.min(node_to_val_map[node]))
 				# print("END", time.time() - _t)
 
 		# Collect node values.
