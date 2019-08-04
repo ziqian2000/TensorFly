@@ -362,9 +362,3 @@ int maxpool_grad(	float* grad,	int grad_h,			int grad_w,
 	}
 	return 0;
 }
-
-int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
-{
-	for(int i = 0; i < len; ++i, ++grad) *output++ = *input++ > 0 ? *grad : 0;
-	return 0;
-}
