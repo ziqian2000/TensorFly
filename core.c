@@ -1,11 +1,18 @@
-#include <cblas.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <mkl.h>
 
 float *mem = NULL;
 int mem_len;
 
+float *mem2 = NULL;
+int mem2_len;
+
 float pos_buffer[3][62722222]; // big enough
+
+int init;
+float **matA, **matB, **matC;
 
 inline float swap_f(float *a, float *b){float c = *a; *a = *b; *b = c;}
 inline int swap_i(int *a, int *b){int c = *a; *a = *b; *b = c;}
@@ -47,12 +54,12 @@ void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, 
 
 inline float* swap_dim2_and_dim3(float *filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
-	if(mem_len < filter_h * filter_w * filter_c * filter_o_c)
+	if(mem2_len < filter_h * filter_w * filter_c * filter_o_c)
 	{
-		free(mem);
-		mem = (float*)malloc((mem_len = filter_h * filter_w * filter_c * filter_o_c) * sizeof(float));
+		free(mem2);
+		mem2 = (float*)malloc((mem2_len = filter_h * filter_w * filter_c * filter_o_c) * sizeof(float));
 	}
-	float *tmp = mem;
+	float *tmp = mem2;
 	for(int h = 0; h < filter_h; ++h)
 	{
 		for(int w = 0; w < filter_w; ++w)
@@ -121,17 +128,31 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 	float *ptr_input_batch = input;
 	float *ptr_output_batch = output;
 
-	if(mem_len < dim1 * dim2)
+	if(mem_len < input_batch * dim1 * dim2)
 	{
 		free(mem);
-		mem = (float*)malloc((mem_len = dim1 * dim2) * sizeof(float));
+		mem = (float*)malloc((mem_len = input_batch * dim1 * dim2) * sizeof(float));
 	}
 
 	float *img = mem; // temporary vector for calculation
-	memset(img, 0, sizeof(float) * dim1 * dim2);
+	memset(img, 0, sizeof(float) * input_batch * dim1 * dim2);
 
-	for(int batch = 0; batch < input_batch; ++batch, ptr_input_batch += batch_size, ptr_output_batch += output_batch_size) // for each patch
+	if(!init)
 	{
+		init = 1;
+		matA = (float**)mkl_malloc(10001 * sizeof(float*), sizeof(float*));
+		matB = (float**)mkl_malloc(10001 * sizeof(float*), sizeof(float*)); 
+		matC = (float**)mkl_malloc(10001 * sizeof(float*), sizeof(float*));
+	}
+
+	for(int batch = 0; batch < input_batch; ++batch, 
+											img += dim1 * dim2,
+											ptr_input_batch += batch_size, 
+											ptr_output_batch += output_batch_size) // for each patch
+	{
+		matA[batch] = img;
+		matB[batch] = filter;
+		matC[batch] = ptr_output_batch;
 
 		float *ptr_input_batch_h = ptr_input_batch;
 		for(int _i_h = -up; _i_h < input_h - up; ++_i_h)
@@ -154,8 +175,35 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 				}
 			}
 		}
-		matmul(img, filter, ptr_output_batch, dim1, dim2, dim3, 0.0);
 	}
+	// matmul(img, filter, ptr_output_batch, dim1, dim2, dim3, 0.0);
+	CBLAS_TRANSPOSE *tran = (CBLAS_TRANSPOSE*)mkl_malloc(input_batch * sizeof(CBLAS_TRANSPOSE), sizeof(CBLAS_TRANSPOSE));
+	MKL_INT *d1 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*d2 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*d3 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*size_per_group = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT));
+	float *al = (float*)mkl_malloc(input_batch * sizeof(float), sizeof(float)), // mkl_malloc
+		  *be = (float*)mkl_malloc(input_batch * sizeof(float), sizeof(float));
+	for(int i = 0; i < input_batch; i++) 
+	{
+		tran[i] = CblasNoTrans;
+		d1[i] = dim1;
+		d2[i] = dim2;
+		d3[i] = dim3;
+		al[i] = 1.0;
+		be[i] = 0.0;
+		size_per_group[i] = 1;
+	}
+	cblas_sgemm_batch(CblasRowMajor, tran, tran, 
+						d1, d3, d2, al, 
+						(const float**)matA, d2, 
+						(const float**)matB, d3, be,
+						matC, d3, 
+						input_batch, size_per_group);
+
+	// mkl_free(matA); mkl_free(matB); mkl_free(matC);
+	mkl_free(tran); mkl_free(d1); mkl_free(d2); mkl_free(d3); mkl_free(size_per_group); mkl_free(al); mkl_free(be);
+
 	return 0;
 }
 
@@ -360,5 +408,11 @@ int maxpool_grad(	float* grad,	int grad_h,			int grad_w,
 			}
 		}
 	}
+	return 0;
+}
+
+int sgn_zero_or_posi(float *input, float *grad, float *output, int len)
+{
+	for(int i = 0; i < len; ++i, ++grad) *output++ = *input++ > 0 ? *grad : 0;
 	return 0;
 }

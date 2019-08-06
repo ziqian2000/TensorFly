@@ -1,4 +1,3 @@
-# from __future__ import division
 import numpy as np
 from tensorfly.connection import *
 from tensorfly.executor import *
@@ -237,6 +236,8 @@ class MatMulOp(Op):
 
 	def compute(self, node, input_vals):
 		a, b = input_vals
+		a = a.astype(np.float32)
+		b = b.astype(np.float32)
 		na, ma = a.shape
 		nb, mb = b.shape
 		if node.matmul_attr_trans_A:
@@ -265,16 +266,17 @@ class DivOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
+		"""Given values of two input nodes, return result of element-wise multiplication."""
 		return np.divide(input_vals[0], input_vals[1])
 
 	def gradient(self, node, output_grad):
 		return [output_grad / node.inputs[1], output_grad * (-node.inputs[0]/node.inputs[1]/node.inputs[1])]
 
 class AssignOp(Op):
-	def __call__(self, ref, value, validate_shape = None, use_locking = None, name = None, dtype = None):
+	def __call__(self, ref, value, validate_shape = None, use_locking = None, name = None):
 		new_node = Op.__call__(self)
 		if not isinstance(value, Node):
-			value = constant(value, dtype = dtype)
+			value = constant(value)
 		new_node.inputs = [value]
 		new_node.const_attr = ref
 		new_node.name = name
@@ -289,10 +291,10 @@ class AssignOp(Op):
 
 class VariableOp(Op):
 	"""mostly the same as PlaceholderOp"""
-	def __call__(self, initilal_value = None, name = "Variable", dtype = np.float32):
+	def __call__(self, initilal_value = None, name = "Variable", dtype = None):
 		new_node = Op.__call__(self)
 		if initilal_value is not None:
-			assign_node = assign(new_node, initilal_value, dtype = dtype)
+			assign_node = assign(new_node, initilal_value)
 			Variable_assign_node_list.append(assign_node)
 		new_node.const_attr = None
 		new_node.name = name
@@ -305,7 +307,7 @@ class VariableOp(Op):
 		return None
 
 class ConstantOp(Op):
-	def __call__(self, value, dtype = np.float32, shape = None, name = 'Const'):
+	def __call__(self, value, dtype = None, shape = None, name = 'Const'):
 		new_node = Op.__call__(self)
 		if not isinstance(value, np.ndarray):
 			value = np.array(value)
@@ -353,7 +355,7 @@ class ZerosLikeOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Returns zeros_like of the same shape as input."""
-		return np.zeros(input_vals[0].shape, dtype = np.float32)
+		return np.zeros(input_vals[0].shape)
 
 	def gradient(self, node, output_grad):
 		return [zeroslike_op(node.inputs[0])]
@@ -369,7 +371,7 @@ class OnesLikeOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Returns ones_like of the same shape as input."""
-		return np.ones(input_vals[0].shape, dtype = np.float32)
+		return np.ones(input_vals[0].shape)
 
 	def gradient(self, node, output_grad):
 		return [zeroslike_op(node.inputs[0])]
@@ -406,60 +408,23 @@ class ReduceSumOp(Op):
 		return [adaptive_broadcast_to_op(output_grad, node.inputs[0], node.const_attr[0], node.const_attr[1])]
 
 class ReduceMeanOp(Op):
-
-	def __call__(self, input_tensor, axis=None, keepdims=None, name=None, reduction_indices=None, keep_dims=None):
-		new_node = Node()
-		new_node.op = self
+	def __call__(self, input_tensor, axis = None, keepdims = False, name = None, reduction_indices = None):
+		new_node = Op.__call__(self)
 		new_node.inputs = [input_tensor]
-		new_node.name = "reduce_mean(%s)" % input_tensor.name
-		if reduction_indices:
-			new_node.axis = reduction_indices[0]
-		else:
-			new_node.axis = axis
-		if keep_dims:
-			new_node.keepdims = keep_dims
-		else:
-			new_node.keepdims = keepdims
-		new_node.name = "reduce_mean(%s,axis=%s,keepdim=%s)" % (input_tensor.name, new_node.axis, new_node.keepdims)
+		if axis is None and reduction_indices is not None:
+			axis = reduction_indices
+		if isinstance(axis, list):
+			axis = axis[0]
+		new_node.const_attr = (axis, keepdims)
+		new_node.name = name if name != None else "ReduceMean(%s)" % input_tensor.name
 		return new_node
 
 	def compute(self, node, input_vals):
-		# assert len(input_vals) == 1, "\033[1;31mNode number not suit at reduce_mean!\033[0m"
-		if node.keepdims:
-			return np.mean(input_vals[0], axis = node.axis, keepdims = node.keepdims)
-		else:
-			return np.mean(input_vals[0], axis = node.axis)
+		return np.mean(input_vals[0], axis = node.const_attr[0], keepdims = node.const_attr[1])
 
-	def gradient(self, node, grad):
-		return [expand_mean(grad, node.inputs[0], node.axis, node.keepdims)]
-
-
-class Expand_MeanOp(Op):
-	def __call__(self, node1, node2, axis, keepdims):
-		new_node = Node()
-		new_node.op = self
-		new_node.inputs = [node1, node2]
-		new_node.axis = axis
-		new_node.keepdims = keepdims
-		new_node.name = "expand_mean(%s, %s, axis=%s, keepdims=%s)" % (node1.name, node2.name, axis, keepdims)
-		return new_node
-
-	def compute(self, node, input_vals):
-		# assert len(input_vals) == 2, "\033[1;31mNode number not suit at expand_mean!\033[0m"
-		if node.axis and not node.keepdims:
-			input_vals[0] = np.expand_dims(input_vals[0], node.axis)
-		new_shape = np.shape(input_vals[1])
-		res = 1
-		if node.axis:
-			res = new_shape[node.axis]
-		else:
-			for i in new_shape:
-				res = res * i
-		return np.array(np.broadcast_to(input_vals[0] / np.float32(res), np.shape(input_vals[1])))
-
-	def gradient(self, node, grad):
-		assert False, "\033[1;31mExpand_mean don't have gradient!\033[0m"
-expand_mean = Expand_MeanOp()
+	def gradient(self, node, output_grad):
+		return [adaptive_broadcast_to_op(output_grad, node.inputs[0], node.const_attr[0], node.const_attr[1])
+				/ reduce_sum(oneslike_op(node.inputs[0]), axis = node.const_attr[0], keepdims = True)]
 
 class AdaptiveBroadcastToOp(Op):
 	""" transform 'tensor' into new 'shape' by inserting an axis in position 'axis' and repeating elements on that axis """
@@ -476,7 +441,7 @@ class AdaptiveBroadcastToOp(Op):
 		if(keepdims):
 			val = np.sum(val, axis)
 		if axis is None:
-			return np.ones(input_vals[1].shape, dtype = np.float32) * val
+			return np.ones(input_vals[1].shape) * val
 		else:
 			return np.broadcast_to(np.expand_dims(val, axis = axis), input_vals[1].shape)
 
@@ -487,7 +452,7 @@ class AdaptiveBroadcastToOp(Op):
 class ZerosOp(Op):
 	def __call__(self, shape, dtype = np.float32, name = None):
 		new_node = Op.__call__(self)
-		new_node.const_attr = np.zeros(shape, dtype = dtype)
+		new_node.const_attr = np.zeros(shape)
 		new_node.name = name
 		return new_node
 
@@ -519,14 +484,13 @@ class SoftmaxCalcOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		raise NotImplementedError # fuck you
 		return SoftmaxCalcFunc(input_vals[0])
 
 	def gradient(self, node ,output_grad):
 		raise NotImplementedError
 
 
-class AdaptiveExpOp(Op):
+class ExpOp(Op):
 	def __call__(self, x, name = None):
 		new_node = Op.__call__(self)
 		new_node.inputs = [x]
@@ -534,9 +498,7 @@ class AdaptiveExpOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		"""adaptive"""
-		tmp = input_vals[0] - np.max(input_vals[0], axis = -1, keepdims = True)
-		return np.exp(tmp)
+		return np.exp(input_vals[0])
 
 	def gradient(self, node, output_grad):
 		return [node * output_grad]
@@ -635,16 +597,20 @@ class ReluOp(Op):
 		return np.maximum(input_vals[0], 0)
 
 	def gradient(self, node, output_grad):
-		return [output_grad * relu_gradient(node.inputs[0])]
+		return [relu_gradient(node.inputs[0], output_grad)]
 
 class ReluGradientOp():
-	def __call__(self, tensor):
+	def __call__(self, tensor, grad):
 		new_node = Op.__call__(self)
-		new_node.inputs = [tensor]
+		new_node.inputs = [tensor, grad]
 		return new_node
 
 	def compute(self, node, input_vals):
-		return (np.sign(input_vals[0]) + 1) * 0.5
+		input = input_vals[0].astype(np.float32)
+		grad = input_vals[1].astype(np.float32)
+		output = np.ndarray(shape = input.shape, dtype = np.float32)
+		c_core.sgn_zero_or_posi(get_pointer(input), get_pointer(grad), get_pointer(output), input.size)
+		return output
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -656,14 +622,13 @@ class SoftmaxCrossEntropyWithLogitsOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		label = input_vals[1]
-		logit = input_vals[0]
-		tmp = np.exp(logit)
-		return -np.sum(label * (np.log(tmp) - np.log(np.sum(tmp, axis = -1, keepdims = True))), axis = 1, keepdims = True)
+		tmp = SoftmaxCalcFunc(input_vals[0])
+		log_node = np.log(tmp)
+		return -np.sum(log_node * input_vals[1], axis = -1, keepdims = True)
 
 	def gradient(self, node, output_grad):
 		"""as the second gradient is useless so I just return zeros to make it faster"""
-		return [output_grad * (nn.softmax(node.inputs[0]) - node.inputs[1]), zeroslike_op(node.inputs[1])]
+		return [output_grad * (softmax_calc_op(node.inputs[0]) - node.inputs[1]), zeroslike_op(node.inputs[1])]
 
 class SqrtOp(Op):
 	def __call__(self, x):
@@ -736,6 +701,8 @@ class Conv2dGrad2Op(Op):
 
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = 1)
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = 1)
+		input = input.astype(np.float32)
+		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
 		c_core.conv2d_grad(get_pointer(input), 		input.shape[0], 		input.shape[1], 		input.shape[2],
 						  get_pointer(output_grad), output_grad.shape[1], 	output_grad.shape[2],
@@ -761,6 +728,7 @@ class MaxPoolOp(Op):
 		ksize, strides, padding = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
+		input = input.astype(np.float32)
 		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32) # the tensor used for result
 		c_core.maxpool( get_pointer(input),		input.shape[1],		input.shape[2],
 						get_pointer(output),	output.shape[0],	output.shape[1],	output.shape[2],	output.shape[3],
@@ -783,6 +751,7 @@ class MaxPoolGradOp(Op):
 		ksize, strides, id = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
+		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(input, dtype = np.float32)
 		c_core.maxpool_grad(	get_pointer(output_grad), 	output_grad.shape[1], 	output_grad.shape[2],
 								get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
@@ -848,7 +817,7 @@ conv2d_grad_2_op = Conv2dGrad2Op()
 div_op = DivOp()
 dropout_mat_op = DropOutMatOp()
 equal = EqualOp()
-exp = AdaptiveExpOp()
+exp = ExpOp()
 global_variables_initializer = VariableInitOp()
 log = LogOp()
 matmul = MatMulOp()
@@ -889,6 +858,8 @@ def SoftmaxCalcFunc(tensor):
 def Conv2dFunc(input, filter, strides, padding, need_to_rotate = False):
 	n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
 	n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
+	input = input.astype(np.float32)
+	filter = filter.astype(np.float32)
 	if(need_to_rotate):
 		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
 	else:

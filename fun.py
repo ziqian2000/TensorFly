@@ -56,13 +56,13 @@ class train:
 	class GradientDescentOptimizer(Optimizer):
 		def __init__(self, learning_rate, use_locking = False, name = 'GradientDescent'):
 			assert use_locking == False # simplify
-			self.learning_rate = np.float32(learning_rate)
+			self.learning_rate = learning_rate
 			self.name = name
 
 		def minimize(self, loss):
 			variables_need = self.get_variables_need(loss)
 			gradients_need = gradients(loss, variables_need)
-			train_node = [assign(variables_need[i], variables_need[i] - gradients_need[i] * self.learning_rate, dtype = np.float32) for i in range(len(variables_need))]
+			train_node = [assign(variables_need[i], variables_need[i] - gradients_need[i] * self.learning_rate) for i in range(len(variables_need))]
 			return pack(train_node)
 
 	class AdamOptimizer(Optimizer):
