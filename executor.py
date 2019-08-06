@@ -32,15 +32,29 @@ class Executor:
 			if not isinstance(node_to_val_map[node], np.ndarray):
 				node_to_val_map[node] = np.array(node_to_val_map[node])
 
+			# if node_to_val_map[node].dtype == np.float64:
+			# 	node_to_val_map[node] = node_to_val_map[node].astype(np.float32)
+			# if node_to_val_map[node].dtype == np.int64:
+			# 	node_to_val_map[node] = node_to_val_map[node].astype(np.int32)
+
 		for node in topo_order:
-			if node not in node_to_val_map:
-				# import time
-				# _t = time.time()
-				# print(type(node.op))
+			if node in node_to_val_map:
+				node_to_val_map[node] = np.array(node_to_val_map[node], dtype = node.const_attr[0])
+			else:
 				node_to_val_map[node] = node.op.compute(node, [node_to_val_map[p] for p in node.inputs])
-				# print(node.op)
-				# print(np.max(node_to_val_map[node]), np.min(node_to_val_map[node]))
-				# print("END", time.time() - _t)
+
+				# if(isinstance(node_to_val_map[node], np.ndarray)) and node_to_val_map[node].dtype != np.float32:
+				# 	print(node.op)
+				# 	print("->" , node_to_val_map[node].dtype)
+				# 	for i in node.inputs: 
+				# 		if(isinstance(node_to_val_map[i], np.ndarray)):
+				# 			print(node_to_val_map[i].dtype)
+				# else:
+				# 	print("?", node.op)
+
+				# print(type(node.op))
+				# if(isinstance(node_to_val_map[node], np.ndarray)):
+				# 	print(np.max(np.abs(node_to_val_map[node])), np.min(np.abs(node_to_val_map[node])))
 
 		# Collect node values.
 		node_val_results = [node_to_val_map[node] for node in self.eval_node_list]

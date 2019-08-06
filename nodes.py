@@ -236,8 +236,6 @@ class MatMulOp(Op):
 
 	def compute(self, node, input_vals):
 		a, b = input_vals
-		a = a.astype(np.float32)
-		b = b.astype(np.float32)
 		na, ma = a.shape
 		nb, mb = b.shape
 		if node.matmul_attr_trans_A:
@@ -273,7 +271,7 @@ class DivOp(Op):
 		return [output_grad / node.inputs[1], output_grad * (-node.inputs[0]/node.inputs[1]/node.inputs[1])]
 
 class AssignOp(Op):
-	def __call__(self, ref, value, validate_shape = None, use_locking = None, name = None):
+	def __call__(self, ref, value, dtype = np.float32, validate_shape = None, use_locking = None, name = None):
 		new_node = Op.__call__(self)
 		if not isinstance(value, Node):
 			value = constant(value)
@@ -291,10 +289,10 @@ class AssignOp(Op):
 
 class VariableOp(Op):
 	"""mostly the same as PlaceholderOp"""
-	def __call__(self, initilal_value = None, name = "Variable", dtype = None):
+	def __call__(self, initilal_value = None, name = "Variable", dtype = np.float32):
 		new_node = Op.__call__(self)
 		if initilal_value is not None:
-			assign_node = assign(new_node, initilal_value)
+			assign_node = assign(new_node, initilal_value, dtype)
 			Variable_assign_node_list.append(assign_node)
 		new_node.const_attr = None
 		new_node.name = name
@@ -307,14 +305,13 @@ class VariableOp(Op):
 		return None
 
 class ConstantOp(Op):
-	def __call__(self, value, dtype = None, shape = None, name = 'Const'):
+	def __call__(self, value, dtype = np.float32, shape = None, name = 'Const'):
 		new_node = Op.__call__(self)
 		if not isinstance(value, np.ndarray):
 			value = np.array(value)
 		if(shape != None):
 			value = np.ones(shape = shape) * value
-		if(dtype != None):
-			value = value.astype(dtype)
+		value = value.astype(dtype)
 		new_node.const_attr = value
 		new_node.name = name
 		new_node.changeable = False
@@ -355,7 +352,7 @@ class ZerosLikeOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Returns zeros_like of the same shape as input."""
-		return np.zeros(input_vals[0].shape)
+		return np.zeros(input_vals[0].shape, dtype = np.float32)
 
 	def gradient(self, node, output_grad):
 		return [zeroslike_op(node.inputs[0])]
@@ -371,7 +368,7 @@ class OnesLikeOp(Op):
 
 	def compute(self, node, input_vals):
 		"""Returns ones_like of the same shape as input."""
-		return np.ones(input_vals[0].shape)
+		return np.ones(input_vals[0].shape, dtype = np.float32)
 
 	def gradient(self, node, output_grad):
 		return [zeroslike_op(node.inputs[0])]
@@ -441,7 +438,7 @@ class AdaptiveBroadcastToOp(Op):
 		if(keepdims):
 			val = np.sum(val, axis)
 		if axis is None:
-			return np.ones(input_vals[1].shape) * val
+			return np.ones(input_vals[1].shape, dtype = np.float32) * val
 		else:
 			return np.broadcast_to(np.expand_dims(val, axis = axis), input_vals[1].shape)
 
@@ -452,7 +449,7 @@ class AdaptiveBroadcastToOp(Op):
 class ZerosOp(Op):
 	def __call__(self, shape, dtype = np.float32, name = None):
 		new_node = Op.__call__(self)
-		new_node.const_attr = np.zeros(shape)
+		new_node.const_attr = np.zeros(shape, dtype = dtype)
 		new_node.name = name
 		return new_node
 
@@ -498,6 +495,7 @@ class ExpOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
+		input_vals[0] = np.minimum(np.maximum(input_vals[0], -20), 20) # fuck you, otherwise use float64
 		return np.exp(input_vals[0])
 
 	def gradient(self, node, output_grad):
@@ -606,8 +604,8 @@ class ReluGradientOp():
 		return new_node
 
 	def compute(self, node, input_vals):
-		input = input_vals[0].astype(np.float32)
-		grad = input_vals[1].astype(np.float32)
+		input = input_vals[0]
+		grad = input_vals[1]
 		output = np.ndarray(shape = input.shape, dtype = np.float32)
 		c_core.sgn_zero_or_posi(get_pointer(input), get_pointer(grad), get_pointer(output), input.size)
 		return output
@@ -701,8 +699,6 @@ class Conv2dGrad2Op(Op):
 
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = 1)
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = 1)
-		input = input.astype(np.float32)
-		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
 		c_core.conv2d_grad(get_pointer(input), 		input.shape[0], 		input.shape[1], 		input.shape[2],
 						  get_pointer(output_grad), output_grad.shape[1], 	output_grad.shape[2],
@@ -728,7 +724,6 @@ class MaxPoolOp(Op):
 		ksize, strides, padding = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		input = input.astype(np.float32)
 		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32) # the tensor used for result
 		c_core.maxpool( get_pointer(input),		input.shape[1],		input.shape[2],
 						get_pointer(output),	output.shape[0],	output.shape[1],	output.shape[2],	output.shape[3],
@@ -751,7 +746,6 @@ class MaxPoolGradOp(Op):
 		ksize, strides, id = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		output_grad = output_grad.astype(np.float32)
 		output = np.zeros_like(input, dtype = np.float32)
 		c_core.maxpool_grad(	get_pointer(output_grad), 	output_grad.shape[1], 	output_grad.shape[2],
 								get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
@@ -797,7 +791,7 @@ class DropOutMatOp(Op):
 		return new_node
 
 	def compute(self, node, input_vals):
-		return (np.random.uniform(size = input_vals[1].shape) < input_vals[0]).astype(np.int)
+		return (np.random.rand(*input_vals[1].shape) < input_vals[0]).astype(np.float32) # fuck you
 
 	def gradient(self, node, output_grad):
 		return [zeroslike_op(node.inputs[0]), zeroslike_op(node.inputs[1])]
@@ -847,19 +841,19 @@ class nn:
 	softmax = SoftmaxJointOp() # available gradient
 	softmax_cross_entropy_with_logits = SoftmaxCrossEntropyWithLogitsOp()
 	max_pool = MaxPoolOp()
-	def dropout(x, keep_prob): return x * dropout_mat_op(keep_prob, x) / keep_prob
+	def dropout(x, keep_prob): 
+		return x * dropout_mat_op(keep_prob, x) / keep_prob
 
 
 def SoftmaxCalcFunc(tensor):
-	exp_tensor = np.exp(tensor - np.max(tensor, axis = -1, keepdims = True))
+	tensor = np.minimum(np.maximum(tensor, -20), 20) # fuck you, otherwise use float64
+	exp_tensor = np.exp(tensor)
 	softmax_tensor = exp_tensor / np.sum(exp_tensor, axis = -1, keepdims = True)
 	return softmax_tensor
 
 def Conv2dFunc(input, filter, strides, padding, need_to_rotate = False):
 	n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
 	n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
-	input = input.astype(np.float32)
-	filter = filter.astype(np.float32)
 	if(need_to_rotate):
 		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
 	else:
