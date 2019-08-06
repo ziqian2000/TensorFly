@@ -1,6 +1,6 @@
 #include <cblas.h>
 #include <stdlib.h>
-#include <string.h>
+#include <string.h> 
 
 float *mem = NULL;
 int mem_len;
