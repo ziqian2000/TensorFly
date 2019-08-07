@@ -1,9 +1,12 @@
 #include <cblas.h>
 #include <stdlib.h>
-#include <string.h> 
+#include <string.h>
 
 float *mem = NULL;
 int mem_len;
+
+float *mem2 = NULL;
+int mem2_len;
 
 float pos_buffer[3][62722222]; // big enough
 
@@ -47,12 +50,12 @@ void matmul_trans(float* a, float* b, float* c, int na, int ma, int nb, int mb, 
 
 inline float* swap_dim2_and_dim3(float *filter, int filter_h, int filter_w, int filter_c, int filter_o_c)
 {
-	if(mem_len < filter_h * filter_w * filter_c * filter_o_c)
+	if(mem2_len < filter_h * filter_w * filter_c * filter_o_c)
 	{
-		free(mem);
-		mem = (float*)malloc((mem_len = filter_h * filter_w * filter_c * filter_o_c) * sizeof(float));
+		free(mem2);
+		mem2 = (float*)malloc((mem2_len = filter_h * filter_w * filter_c * filter_o_c) * sizeof(float));
 	}
-	float *tmp = mem;
+	float *tmp = mem2;
 	for(int h = 0; h < filter_h; ++h)
 	{
 		for(int w = 0; w < filter_w; ++w)
