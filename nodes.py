@@ -138,11 +138,20 @@ class AddOp(Op):
 		new_node = Op.__call__(self)
 		new_node.inputs = [node_A, node_B]
 		new_node.name = "(%s+%s)" % (node_A.name, node_B.name)
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
 		"""Given values of two input nodes, return result of element-wise addition."""
-		return input_vals[0] + input_vals[1]
+		a, b = input_vals
+		if a.size > 1000 and isinstance(a, np.ndarray) and isinstance(b, np.ndarray) and a.shape == b.shape:
+			if a.shape not in node.buf:
+				node.buf[a.shape] = np.ndarray(shape = a.shape, dtype = a.dtype)
+			c = node.buf[a.shape]
+			c_core.add(get_pointer(a), get_pointer(b), get_pointer(c), a.size)
+			return c
+		else:
+			return np.add(a, b)
 
 	def gradient(self, node, output_grad):
 		"""Given gradient of add node, return gradient contributions to each input."""
@@ -589,10 +598,16 @@ class ReluOp(Op):
 	def __call__(self, tensor):
 		new_node = Op.__call__(self)
 		new_node.inputs = [tensor]
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
-		return np.maximum(input_vals[0], 0)
+		input = input_vals[0]
+		if input.shape not in node.buf:
+			node.buf[input.shape] = np.ndarray(shape = input.shape, dtype = input.dtype)
+		tmp = node.buf[input.shape]
+		c_core.relu(get_pointer(input), get_pointer(tmp), input.size)
+		return tmp
 
 	def gradient(self, node, output_grad):
 		return [relu_gradient(node.inputs[0], output_grad)]
@@ -601,14 +616,16 @@ class ReluGradientOp():
 	def __call__(self, tensor, grad):
 		new_node = Op.__call__(self)
 		new_node.inputs = [tensor, grad]
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
-		input = input_vals[0]
-		grad = input_vals[1]
-		output = np.ndarray(shape = input.shape, dtype = np.float32)
-		c_core.sgn_zero_or_posi(get_pointer(input), get_pointer(grad), get_pointer(output), input.size)
-		return output
+		input, grad = input_vals
+		if input.shape not in node.buf:
+			node.buf[input.shape] = np.ndarray(shape = input.shape, dtype = input.dtype)
+		tmp = node.buf[input.shape]
+		c_core.sgn_zero_or_posi(get_pointer(input), get_pointer(grad), get_pointer(tmp), input.size)
+		return tmp
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -662,12 +679,14 @@ class Conv2dOp(Op):
 		new_node.inputs = [input, filter]
 		new_node.const_attr = (strides, padding)
 		new_node.changeable = any([x.changeable for x in new_node.inputs])
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
 		input, filter = input_vals
 		strides, padding = node.const_attr
-		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = node.const_attr[0], padding = node.const_attr[1], need_to_rotate = False)
+		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = node.const_attr[0], padding = node.const_attr[1], 
+																									node = node, need_to_rotate = False)
 
 	def gradient(self, node, output_grad):
 		return [conv2d_grad_1_op(output_grad, node.inputs[1]) 					if node.inputs[0].changeable else node.inputs[0], 
@@ -678,11 +697,12 @@ class Conv2dGrad1Op(Op):
 	def __call__(self, output_grad, filter):
 		new_node = Op.__call__(self)
 		new_node.inputs = [output_grad, filter]
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
 		"""maybe it can return zeros since it can not be changed"""
-		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = [1,1,1,1], padding = 'SAME', need_to_rotate = True)
+		return Conv2dFunc(input = input_vals[0], filter = input_vals[1], strides = [1,1,1,1], padding = 'SAME', node = node, need_to_rotate = True)
 
 	def gradient(self, node, output_grad):
 		raise NotImplementedError
@@ -692,6 +712,7 @@ class Conv2dGrad2Op(Op):
 	def __call__(self, output_grad, input, filter):
 		new_node = Op.__call__(self)
 		new_node.inputs = [output_grad, input, filter]
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -699,7 +720,13 @@ class Conv2dGrad2Op(Op):
 
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = 1)
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = 1)
-		output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
+
+		out_shape = filter.shape
+		if out_shape not in node.buf:
+			node.buf[out_shape] = np.ndarray(shape = out_shape, dtype = filter.dtype)
+		output = node.buf[out_shape] # the tensor used for result
+		
+		# output = np.zeros_like(filter, dtype = np.float32) # the tensor used for result
 		c_core.conv2d_grad(get_pointer(input), 		input.shape[0], 		input.shape[1], 		input.shape[2],
 						  get_pointer(output_grad), output_grad.shape[1], 	output_grad.shape[2],
 						  get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
@@ -717,6 +744,7 @@ class MaxPoolOp(Op):
 		new_node.inputs = [value]
 		new_node.const_attr = (ksize, strides, padding)
 		new_node.id = ++timer
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -724,7 +752,13 @@ class MaxPoolOp(Op):
 		ksize, strides, padding = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32) # the tensor used for result
+
+		out_shape = input.shape
+		if out_shape not in node.buf:
+			node.buf[out_shape] = np.ndarray(shape = [input.shape[0], o_h, o_w, input.shape[3]], dtype = input.dtype)
+		output = node.buf[out_shape] # the tensor used for result
+
+		# output = np.zeros([input.shape[0], o_h, o_w, input.shape[3]], dtype = np.float32)
 		c_core.maxpool( get_pointer(input),		input.shape[1],		input.shape[2],
 						get_pointer(output),	output.shape[0],	output.shape[1],	output.shape[2],	output.shape[3],
 						strides[1],			strides[2],
@@ -739,6 +773,7 @@ class MaxPoolGradOp(Op):
 		new_node = Op.__call__(self)
 		new_node.inputs = [input, output_grad]
 		new_node.const_attr = (ksize, strides, id)
+		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
@@ -746,7 +781,13 @@ class MaxPoolGradOp(Op):
 		ksize, strides, id = node.const_attr
 		n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = ksize[1], stride = strides[1])
 		n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = ksize[2], stride = strides[2])
-		output = np.zeros_like(input, dtype = np.float32)
+
+		out_shape = input.shape
+		if out_shape not in node.buf:
+			node.buf[out_shape] = np.ndarray(shape = out_shape, dtype = input.dtype)
+		output = node.buf[out_shape] # the tensor used for result
+
+		# output = np.zeros_like(input, dtype = np.float32)
 		c_core.maxpool_grad(	get_pointer(output_grad), 	output_grad.shape[1], 	output_grad.shape[2],
 								get_pointer(output),		output.shape[0], 		output.shape[1],		output.shape[2],		output.shape[3],
 								strides[1],					strides[2],
@@ -851,13 +892,26 @@ def SoftmaxCalcFunc(tensor):
 	softmax_tensor = exp_tensor / np.sum(exp_tensor, axis = -1, keepdims = True)
 	return softmax_tensor
 
-def Conv2dFunc(input, filter, strides, padding, need_to_rotate = False):
+def Conv2dFunc(input, filter, strides, padding, node, need_to_rotate = False):
 	n_h, o_h = calc_new_len(h1 = input.shape[1], h2 = filter.shape[0], stride = strides[1])
 	n_w, o_w = calc_new_len(h1 = input.shape[2], h2 = filter.shape[1], stride = strides[2])
 	if(need_to_rotate):
-		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
+
+		out_shape = (input.shape[0], o_h, o_w, filter.shape[2])
+		if out_shape not in node.buf:
+			node.buf[out_shape] = np.ndarray(shape = out_shape, dtype = input.dtype)
+		output = node.buf[out_shape] # the tensor used for result
+
+		# output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[2]], dtype = np.float32) # the tensor used for result (1)
 	else:
-		output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result (2)
+
+		out_shape = (input.shape[0], o_h, o_w, filter.shape[3])
+		if out_shape not in node.buf:
+			node.buf[out_shape] = np.ndarray(shape = out_shape, dtype = input.dtype)
+		output = node.buf[out_shape] # the tensor used for result
+
+		# output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result (2)
+
 	c_core.conv2d(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2],
 					get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
 					get_pointer(output),	output.shape[1],	output.shape[2],

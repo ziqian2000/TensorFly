@@ -85,9 +85,9 @@ class train:
 			for i, node in enumerate(variables_need):
 				g = gradients_need[i]
 				m = constant(0)
-				assign_m = assign(m, self.beta1 * m + (1 - self.beta1) * g)
+				assign_m = assign(m, (1 - self.beta1) * g + self.beta1 * m)
 				v = constant(0)
-				assign_v = assign(v, self.beta2 * v + (1 - self.beta2) * g * g)
+				assign_v = assign(v, (1 - self.beta2) * g * g + self.beta2 * v)
 				assign_node = assign(node, node - self.lrt * assign_m / (sqrt_op(assign_v) + self.epsilon))
 				train_node.append(assign_node)
 			return pack(train_node)
