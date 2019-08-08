@@ -241,25 +241,18 @@ class MatMulOp(Op):
 		new_node.inputs = [node_A, node_B]
 		new_node.name = "MatMul(%s,%s,%s,%s)" % (node_A.name, node_B.name, str(trans_A), str(trans_B))
 		new_node.changeable = any([x.changeable for x in new_node.inputs])
-		new_node.buf = {}
 		return new_node
 
 	def compute(self, node, input_vals):
 		a, b = input_vals
 		na, ma = a.shape
 		nb, mb = b.shape
-		out_shape = ()
-
 		if node.matmul_attr_trans_A:
-			if node.matmul_attr_trans_B: out_shape = (ma, nb)	
-			else:						 out_shape = (ma, mb)
+			if node.matmul_attr_trans_B: 	c = np.ndarray(shape = (ma, nb), dtype = np.float32)
+			else:							c = np.ndarray(shape = (ma, mb), dtype = np.float32)
 		else:
-			if node.matmul_attr_trans_B: out_shape = (na, nb)	
-			else:						 out_shape = (na, mb)
-
-		if out_shape not in node.buf: node.buf[out_shape] = np.ndarray(shape = out_shape, dtype = np.float32)
-		c = node.buf[out_shape]	
-
+			if node.matmul_attr_trans_B:	c = np.ndarray(shape = (na, nb), dtype = np.float32)
+			else:							c = np.ndarray(shape = (na, mb), dtype = np.float32)
 		c_core.matmul_trans(get_pointer(a), get_pointer(b), get_pointer(c), na, ma, nb, mb, 
 						int(node.matmul_attr_trans_A), int(node.matmul_attr_trans_B))
 		return c
@@ -918,16 +911,9 @@ def Conv2dFunc(input, filter, strides, padding, node, need_to_rotate = False):
 		output = node.buf[out_shape] # the tensor used for result
 
 		# output = np.ndarray(shape = [input.shape[0], o_h, o_w, filter.shape[3]], dtype = np.float32) # the tensor used for result (2)
-	if input.shape[0] > 1000:
-		c_core.conv2d_normal(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2],
-								get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
-								get_pointer(output),	output.shape[1],	output.shape[2],
-								(n_h - input.shape[1]) // 2, 			(n_w - input.shape[2]) // 2,	int(need_to_rotate))
-	else:
-		c_core.conv2d_mkl(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2],
-							get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
-							get_pointer(output),	output.shape[1],	output.shape[2],
-							(n_h - input.shape[1]) // 2, 			(n_w - input.shape[2]) // 2,	int(need_to_rotate))
 
-
+	c_core.conv2d(	get_pointer(input), 	input.shape[0], 	input.shape[1], 	input.shape[2],
+					get_pointer(filter), 	filter.shape[0], 	filter.shape[1], 	filter.shape[2], 	filter.shape[3],
+					get_pointer(output),	output.shape[1],	output.shape[2],
+					(n_h - input.shape[1]) // 2, 			(n_w - input.shape[2]) // 2,	int(need_to_rotate))
 	return output
