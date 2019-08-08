@@ -1,4 +1,5 @@
-#include <cblas.h>
+#include <mkl.h>
+#include <omp.h>
 #include <stdlib.h>
 #include <string.h>
 #include <thread>
@@ -12,6 +13,9 @@ float *mem2 = NULL;
 int mem2_len;
 
 float pos_buffer[3][62722222]; // big enough
+
+int init;
+float **matA, **matB, **matC;
 
 inline float swap_f(float *a, float *b){float c = *a; *a = *b; *b = c;}
 inline int swap_i(int *a, int *b){int c = *a; *a = *b; *b = c;}
@@ -99,12 +103,11 @@ inline void rotate_180(float *filter, int filter_h, int filter_w, int filter_c, 
 	}
 }
 
-
 extern "C"
-int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
-			float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
-			float* output,	int output_h,		int output_w,
-			int up,			int left, 			int need_to_rotate)
+int conv2d_mkl( float* input,	int input_batch,	int input_h,	int input_w,
+				float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
+				float* output,	int output_h,		int output_w,
+				int up,			int left, 			int need_to_rotate)
 {
 	if(need_to_rotate) // for gradient calculation
 	{
@@ -124,8 +127,108 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 	int dim2 = filter_h * filter_w * filter_c;
 	int dim3 = filter_o_c;
 
-	float *ptr_input_batch = input;
-	float *ptr_output_batch = output;
+	if(mem_len < input_batch * dim1 * dim2)
+	{
+		free(mem);
+		mem = (float*)malloc((mem_len = input_batch * dim1 * dim2) * sizeof(float));
+	}
+
+	memset(mem, 0, sizeof(float) * input_batch * dim1 * dim2);
+
+	if(!init)
+	{
+		init = 1;
+		matA = (float**)mkl_malloc(10001 * sizeof(float*), sizeof(float*));
+		matB = (float**)mkl_malloc(10001 * sizeof(float*), sizeof(float*)); 
+		matC = (float**)mkl_malloc(10001 * sizeof(float*), sizeof(float*));
+	}
+
+	#pragma omp parallel for 
+	for(int batch = 0; batch < input_batch; ++batch) // for each patch
+	{
+		float *img = mem + batch * dim1 * dim2;
+		matA[batch] = img;
+		matB[batch] = filter;
+		matC[batch] = output + batch * output_batch_size;
+		float *ptr_input_batch = input + batch * batch_size;
+
+		float *ptr_input_batch_h = ptr_input_batch;
+		for(int _i_h = -up; _i_h < input_h - up; ++_i_h)
+		{
+			for(int _i_w = -left; _i_w < input_w - left; ++_i_w)
+			{
+				int i_h = _i_h + up, i_w = _i_w + left;
+				int shift_size = (max(0, _i_w) - _i_w) * filter_c, move_size = filter_w * filter_c;
+				float *ptr_input_batch_h_w_h2 = ptr_input_batch_h + (_i_h * input_w + _i_w) * filter_c + shift_size;
+				float *ptr_img = img + (i_h * output_w + i_w) * filter_h * filter_w * filter_c + shift_size;
+
+				int w_len = min(output_w, _i_w + filter_w) - max(0, _i_w);
+				int copy_len = w_len * copy_size;
+
+				for(int i_h2 = 0, i_h2_ = min(filter_h, output_h - _i_h); i_h2 < i_h2_; ++i_h2,  ptr_input_batch_h_w_h2 += batch_h_size,
+															ptr_img += move_size)
+				{
+					if(i_h2 + _i_h < 0) continue;
+					memcpy(ptr_img, ptr_input_batch_h_w_h2, copy_len);
+				}
+			}
+		}
+	}
+
+	CBLAS_TRANSPOSE *tran = (CBLAS_TRANSPOSE*)mkl_malloc(input_batch * sizeof(CBLAS_TRANSPOSE), sizeof(CBLAS_TRANSPOSE));
+	MKL_INT *d1 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*d2 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*d3 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*size_per_group = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT));
+	float *al = (float*)mkl_malloc(input_batch * sizeof(float), sizeof(float)), // mkl_malloc
+		  *be = (float*)mkl_malloc(input_batch * sizeof(float), sizeof(float));
+
+	for(int i = 0; i < input_batch; i++) 
+	{
+		tran[i] = CblasNoTrans;
+		d1[i] = dim1;
+		d2[i] = dim2;
+		d3[i] = dim3;
+		al[i] = 1.0;
+		be[i] = 0.0;
+		size_per_group[i] = 1;
+	}
+	cblas_sgemm_batch(CblasRowMajor, tran, tran, 
+						d1, d3, d2, al, 
+						(const float**)matA, d2, 
+						(const float**)matB, d3, be,
+						matC, d3, 
+						input_batch, size_per_group);
+
+	mkl_free(tran); mkl_free(d1); mkl_free(d2); mkl_free(d3); mkl_free(size_per_group); mkl_free(al); mkl_free(be);
+
+	return 0;
+}
+
+
+extern "C"
+int conv2d_normal(  float* input,	int input_batch,	int input_h,	int input_w,
+					float* filter,	int filter_h,		int filter_w,	int filter_c,	int filter_o_c,
+					float* output,	int output_h,		int output_w,
+					int up,			int left, 			int need_to_rotate)
+{
+	if(need_to_rotate) // for gradient calculation
+	{
+		filter = swap_dim2_and_dim3( filter, filter_h, filter_w, filter_c, filter_o_c);
+		swap_i(&filter_c, &filter_o_c);
+		rotate_180(			filter, filter_h, filter_w, filter_c, filter_o_c);
+	}
+
+	int batch_size = input_h * input_w * filter_c;
+	int batch_h_size = input_w * filter_c;
+	int batch_h_w_size = filter_c;
+	int output_batch_size = output_h * output_w * filter_o_c;
+
+	int copy_size = filter_c * sizeof(float);
+
+	int dim1 = output_h * output_w;
+	int dim2 = filter_h * filter_w * filter_c;
+	int dim3 = filter_o_c;
 
 	if(mem_len < dim1 * dim2)
 	{
@@ -136,8 +239,10 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 	float *img = mem; // temporary vector for calculation
 	memset(img, 0, sizeof(float) * dim1 * dim2);
 
-	for(int batch = 0; batch < input_batch; ++batch, ptr_input_batch += batch_size, ptr_output_batch += output_batch_size) // for each patch
+	for(int batch = 0; batch < input_batch; ++batch) // for each patch
 	{
+		float *ptr_input_batch = input + batch * batch_size;
+		float *ptr_output_batch = output + batch * output_batch_size;
 
 		float *ptr_input_batch_h = ptr_input_batch;
 		for(int _i_h = -up; _i_h < input_h - up; ++_i_h)
@@ -165,6 +270,8 @@ int conv2d( float* input,	int input_batch,	int input_h,	int input_w,
 	return 0;
 }
 
+
+
 extern "C"
 int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 				float* grad,	int grad_h,			int grad_w,	
@@ -184,20 +291,30 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 	int dim2 = grad_h * grad_w;
 	int dim3 = output_o_c;
 
-	float *ptr_input_batch = input;
-	float *ptr_grad_batch = grad;
-
-	if(mem_len < dim1 * dim2)
+	if(mem_len < input_batch * dim1 * dim2)
 	{
 		free(mem);
-		mem = (float*)malloc((mem_len = dim1 * dim2) * sizeof(float));
+		mem = (float*)malloc((mem_len = input_batch * dim1 * dim2) * sizeof(float));
+	}
+	if(mem2_len < input_batch * dim1 * dim3)
+	{
+		free(mem2);
+		mem2 = (float*)malloc((mem2_len = input_batch * dim1 * dim3) * sizeof(float));
 	}
 
-	float *img = mem; // temporary vector for calculation
-	memset(img, 0, sizeof(float) * dim1 * dim2);
+	memset(mem, 0, sizeof(float) * input_batch * dim1 * dim2);
 
-	for(int batch = 0; batch < input_batch; ++batch, ptr_input_batch += batch_size, ptr_grad_batch += grad_batch_size) // for each patch
+	#pragma omp parallel for 
+	for(int batch = 0; batch < input_batch; ++batch) // for each patch
 	{
+		float *img = mem + batch * dim1 * dim2; // temporary vector for calculation
+		float *ptr_input_batch = input + batch * batch_size;
+		float *ptr_grad_batch = grad + batch * grad_batch_size;
+
+		matA[batch] = img;
+		matB[batch] = ptr_grad_batch;
+		matC[batch] = mem2 + batch * dim1 * dim3;
+
 		float *ptr_img = img;
 		for(int _i_h = -up, _i_h_ = output_h - up; _i_h < _i_h_; ++_i_h)
 		{
@@ -245,8 +362,39 @@ int conv2d_grad(float* input,	int input_batch,	int input_h,	int input_w,
 				}
 			}
 		}
-		matmul(img, ptr_grad_batch, output, dim1, dim2, dim3, batch > 0 ? 1.0 : 0.0);
+		// matmul(img, ptr_grad_batch, output, dim1, dim2, dim3, batch > 0 ? 1.0 : 0.0);
 	}
+
+	CBLAS_TRANSPOSE *tran = (CBLAS_TRANSPOSE*)mkl_malloc(input_batch * sizeof(CBLAS_TRANSPOSE), sizeof(CBLAS_TRANSPOSE));
+	MKL_INT *d1 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*d2 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*d3 = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT)),
+			*size_per_group = (MKL_INT*)mkl_malloc(input_batch * sizeof(MKL_INT), sizeof(MKL_INT));
+	float *al = (float*)mkl_malloc(input_batch * sizeof(float), sizeof(float)), // mkl_malloc
+		  *be = (float*)mkl_malloc(input_batch * sizeof(float), sizeof(float));
+
+	for(int i = 0; i < input_batch; i++) 
+	{
+		tran[i] = CblasNoTrans;
+		d1[i] = dim1;
+		d2[i] = dim2;
+		d3[i] = dim3;
+		al[i] = 1.0;
+		be[i] = 0.0;
+		size_per_group[i] = 1;
+	}
+	cblas_sgemm_batch(CblasRowMajor, tran, tran, 
+						d1, d3, d2, al, 
+						(const float**)matA, d2, 
+						(const float**)matB, d3, be,
+						matC, d3, 
+						input_batch, size_per_group);
+
+	mkl_free(tran); mkl_free(d1); mkl_free(d2); mkl_free(d3); mkl_free(size_per_group); mkl_free(al); mkl_free(be);
+
+	memset(output, 0, sizeof(float) * dim1 * dim3);
+	for(int i = 0; i < input_batch * dim1 * dim3; i++) output[i % (dim1 * dim3)] += mem2[i];
+
 	return 0;
 }
 
@@ -430,16 +578,21 @@ extern "C"
 void sgn_zero_or_posi(float *input, float *grad, float *output, int len)
 {
 	for(int i = 0; i < len; ++i, ++grad, ++output) *input++ > 0 ? *output = *grad : (*output = 0);
+// #pragma omp parallel for 
+// 	for(int i = 0; i < len; ++i) input[i] > 0 ? output[i] = grad[i] : (output[i] = 0);
 }
 
 extern "C"
 void relu(float *input, float *output, int len)
 {
 	for(int i = 0; i < len; ++i, ++input, ++output) *input < 0 ? *output = 0 : (*output = *input);
+// #pragma omp parallel for 
+// 	for(int i = 0; i < len; ++i) input[i] < 0 ? output[i] = 0 : (output[i] = input[i]);
 }
 
 extern "C"
 void add(float *a, float *b, float *c, int len)
 {
+// #pragma omp parallel for 
 	for(int i = 0; i < len; ++i) c[i] = a[i] + b[i];
 }
