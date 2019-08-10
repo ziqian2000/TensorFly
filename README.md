@@ -1,6 +1,6 @@
 # TensorFly
 
-TensorFly is an open source project (for SJTU  PPCA 2019 ML-system). Its [API](<https://tensorflow.google.cn/versions/r1.14/api_docs/python/tf>) is almost the same as TensorFlow (r1.14 stable), but many methods are not implemented.
+TensorFly is an open source project (for SJTU  PPCA 2019 ML-system). Its API is almost the same as [TensorFlow (r1.14 stable)](<https://tensorflow.google.cn/versions/r1.14/api_docs/python/tf>), but many methods are not implemented.
 
 ## How to run test
 
